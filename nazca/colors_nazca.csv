@@ -1,0 +1,25 @@
+animation,datatype,depth,dither-pattern,fill-brightness,fill-color,frame-brightness,frame-color,layer,marked,name,transparent,valid,visible,width
+0,*,1,,0,,0,,*,false,Foundry Layers,false,true,true,
+0,0,2,I0,0,#000080,0,#000080,1,false,1/0 Waveguide Fine,false,true,true,1
+0,0,2,I2,0,#9580ff,0,#9580ff,2,false,2/0 Waveguide Coarse,false,true,true,1
+0,0,2,I15,0,#69d49d,0,#69d49d,3,false,3/0 Deep Trench,false,true,true,1
+0,0,2,I15,0,#ff9d9d,0,#ff9d9d,4,false,4/0 Shallow Trench,false,true,true,1
+0,0,2,I0,0,#ffea00,0,#ffea00,10,false,10/0 Metal DC,false,true,true,1
+0,0,2,I0,0,#ff8000,0,#ff8000,11,false,11/0 Metal RF,false,true,true,1
+0,0,2,I3,0,#808080,0,#404040,20,false,20/0 Building Block,false,true,true,2
+0,0,2,I0,0,#606060,0,#606060,21,false,21/0 Documentation,false,true,true,1
+0,*,1,,0,,0,,*,false,Nazca layers,false,true,true,
+0,0,2,I0,0,#6edda4,16,,300,false,300/0 Guide Deep,false,true,true,1
+0,0,2,I12,0,#76eeb0,0,#76eeb0,301,false,301/0 Trench Deep,false,true,true,1
+0,0,2,I12,0,#76eeb0,0,#76eeb0,303,false,303/0 Trench Deep Stub,false,true,true,1
+0,0,2,I0,0,#6edda4,0,#000000,302,false,302/0 Guide Deep Stub,false,true,true,3
+0,0,2,I0,0,#ff0080,0,#000000,400,false,400/0 Guide Shallow,false,true,true,1
+0,0,2,I12,0,#ff80a8,0,#ff80a8,401,false,401/0 Trench Shallow,false,true,true,1
+0,0,2,I12,0,#ff80a8,0,#ff80a8,403,false,403/0 Trench Shallow Stub,false,true,true,1
+0,0,2,I0,0,#ff0080,0,#000000,402,false,402/0 Guide Shallow Stub,false,true,true,3
+0,0,2,I2,0,#ffea00,0,#ffea00,500,false,500/0 DC Metal Logic BB,false,true,true,0
+0,0,2,I0,0,#ffea00,0,#ffea00,501,false,501/0 DC Metal Stub,false,true,true,1
+0,0,2,I2,0,#ffae00,0,#ffae00,510,false,510/0 RF Metal Logic BB,false,true,true,1
+0,0,2,I0,0,#ffae00,0,#ffae00,511,false,511/0 RF Metal Stub,false,true,true,1
+0,0,2,I0,0,#8086ff,0,#8086ff,700,false,700/0 Annotations,false,true,true,1
+0,0,2,I1,0,#000000,0,#000000,702,false,702/0 Anntotations Pins,false,true,true,2

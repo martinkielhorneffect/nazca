@@ -1,0 +1,37 @@
+depth,layer,datatype,name,fill_color,frame_color,frame_brightness,fill_brightness,dither_pattern,valid,visible,transparent,width,marked,animation
+1,*,*,,,,0,0,,true,true,false,,false,0
+2,68,0,68/0 BB Metal,#ffae00,#ffae00,160,160,I0,true,true,true,,false,0
+2,67,0,67/0 BB Boundary,#ffffff,#000000,0,0,I3,true,true,false,2,false,0
+2,1,0,1/0 WaveguidesFine,#0080ff,#0080ff,-8,0,I0,true,true,false,,false,0
+2,2,0,2/0 WaveguidesCoarse,#800080,#800080,0,0,I12,true,true,false,,false,0
+2,4,0,4/0 DeepEtch,#80a8ff,#80a8ff,272,272,I0,true,true,true,1,false,0
+2,11,0,11/0 InversionExpansionFine,#ff00ff,#ff00ff,256,256,I0,true,true,true,,false,0
+2,12,0,12/0 InversionExpansionCoarse,#ff00ff,#ff00ff,288,288,I0,true,true,true,,false,0
+2,36,0,36/0 PlatingCoarse,#ffe308,#ffe308,0,0,I2,true,true,false,,false,0
+2,60,0,60/0 BBtext,#c0c0c0,#808080,0,64,I0,true,true,true,,false,0
+2,200,0,200/0 Polyimide1Base,#c0c0c0,#c0c0c0,0,0,I3,true,true,false,,false,0
+2,203,0,203/0 Poyimide2SubWG,#ffa080,#ffa080,0,0,I3,true,true,false,,false,0
+1,*,*,Nazca layers,,,0,0,,true,true,false,,false,0
+2,*,*,Logic view,,,0,0,,true,true,false,,false,0
+3,300,0,300/0 guide,#9580ff,#800000,0,0,I0,true,true,false,0,false,0
+3,301,0,301/0 deep-trench,#8086ff,#800057,272,272,I0,true,true,true,0,false,0
+3,303,0,303/0 guide,#ff0080,#000000,0,0,I0,true,true,false,0,false,0
+3,304,0,304/0 trench,#ff00ff,#000080,288,288,I0,true,true,true,0,false,0
+3,306,0,306/0 metal,#ffae00,#ffae00,32,32,I2,true,true,false,1,false,0
+3,'guide-stub' 400,0,400/0 guide stub,#9580ff,#000000,0,0,I0,true,true,true,2,false,0
+3,401,0,401/0 trench-stub,#8086ff,#80a8ff,192,192,I0,true,true,true,2,false,0
+3,402,0,402/0 guide-stub,#ff0080,#000000,0,0,I0,true,true,true,2,false,0
+3,403,0,403/0 trench-stub,#ff00ff,#ff0080,240,240,I0,true,true,true,2,false,0
+3,404,0,404/0 metal-stub,#ffae00,#000000,32,32,I2,true,true,true,2,false,0
+2,*,*,Coating,,,0,0,,true,true,false,,false,0
+3,310,0,HR,#ffcfeb,#ffcfeb,0,0,I12,true,true,false,0,false,0
+3,311,0,AR,#ffffff,#ffa080,0,0,I2,true,true,false,0,false,0
+3,312,0,NO,#ffc280,#ffc280,0,0,I2,true,true,false,,false,0
+3,313,0,NA,#64be89,#64be89,0,0,I2,true,true,false,,false,0
+2,232,0,232/0 pin,#000080,#000080,0,0,I1,true,true,false,3,false,0
+2,*,*,Annotations,,,0,0,,true,true,false,,false,0
+3,220,0,Parameters,#8086ff,#8086ff,0,0,I9,true,false,false,,false,0
+3,221,0,IOs,#80a8ff,#80a8ff,0,0,I5,true,true,false,,false,0
+2,500,0,xs mismatch,#ff0000,#ff0000,0,0,I0,true,true,false,1,false,0
+2,321,0,cleavel line,#ffffff,#ffffff,0,0,I5,true,true,false,3,false,0
+2,360,0,Fiber IO,#0080ff,#80a8ff,0,0,I3,true,true,false,1,false,0
