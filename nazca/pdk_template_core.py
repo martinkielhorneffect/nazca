@@ -25,9 +25,11 @@ from collections import OrderedDict
 import inspect
 from functools import wraps
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import json
 from pprint import pprint
+from PIL import Image
 
 import hashlib
 import nazca as nd
@@ -261,7 +263,7 @@ def rangecheck(allowed_values):
     error info is provided to solve the issue.
 
     Args:
-        allowed_values (dict): {str: tuple} as {'<var_name>': (low, <var_name>, high)}
+        allowed_values (dict): {'<var_name>': (low, <var_name>, high)}
 
     Raises:
         ValueError if out of range.
@@ -285,8 +287,12 @@ def rangecheck(allowed_values):
     """
     err = ''
     for var, (low, value, high) in allowed_values.items():
+        if low is None:
+            low = float('-inf')
+        if high is None:
+            high = float('inf')
         if low <= value <= high:
-            pass
+            continue
         elif value < low:
             err += "{0}={3} too small. Allowed values: {1}<={0}<={2}\n".\
                  format(var, low, high, value)
@@ -331,9 +337,6 @@ def parameters(parameters=None):
     Returns:
         None
     """
-
-    #store parameters as a dict in the cell for PDK checks
-
     cell = cfg.cells[-1]
     if isinstance(parameters, dict):
         cell.parameters = parameters
@@ -452,7 +455,7 @@ def make_pincell(layer=None, shape=None, size=None):
     name = cfg.gds_cellname_cleanup(name)
     if name in cfg.cellnames.keys():
         return cfg.cellnames[name]
-    with nd.Cell(name, instantiate=cfg.pin_instantiate) as arrow:
+    with nd.Cell(name, instantiate=cfg.pin_instantiate, store_pins=False) as arrow:
         outline = [(x*size, y*size) for x, y in cfg.pinshapes[shape]]
         nd.Polygon(layer=layer, points=outline).put(0)
     return arrow
@@ -509,7 +512,7 @@ def _makestub(xs_guide=None, width=0, length=2.0, shape=None, pinshape=None,
         if xs_guide not in cfg.XSdict.keys():
             if xs_guide not in missing_xs:
                 missing_xs.append(xs_guide)
-                print("Can not make a stub in an undefined xsection '{0}'.\n"\
+                print("Can not make a stub in undefined xsection '{0}'.\n"\
                    "  Possible causes: '{0}' is misspelled or not yet defined.\n"\
                    "  Will use xsection '{2}' instead and continue.\n"
                    "  To define a new xsection:\n"\
@@ -535,7 +538,7 @@ def _makestub(xs_guide=None, width=0, length=2.0, shape=None, pinshape=None,
     if width is None:
         width = 0
 
-    with nd.Cell(name, instantiate=cfg.stub_instantiate) as C:
+    with nd.Cell(name, instantiate=cfg.stub_instantiate, store_pins=False) as C:
         arrow.put(0)
 
         if cell is not None:
@@ -624,7 +627,10 @@ def put_stub(pinname=None, length=None, shape='box', pinshape=None, pinsize=None
                     width = 0
                 else:
                     xs = node.xs
-                    width = node.width
+                    try:
+                        width = float(node.width)
+                    except:
+                        width = None
 
                 node.show = True #display pin name in layout and fingerprint
                 if xs is None: # pincell only
@@ -645,6 +651,17 @@ def put_stub(pinname=None, length=None, shape='box', pinshape=None, pinsize=None
             raise
 
 def set_pdk_pinstyle(pin_settings):
+    """Set a custom pin style for a technology.
+
+    Start with the cfg default settings and overrule these for settings provided
+    in <pin_settings>.
+
+    Args:
+        pin_settings (dict):
+
+    Returns:
+        None
+    """
     keys = nd.cfg.pin_settings.keys()
 
     if pin_settings is not None:
@@ -774,7 +791,6 @@ def bb_fingerprint(cellcalls, save=False, filename='fingerprint.json', infolevel
         except:
             length = 'None'
             width = 'None'
-
         fingerprint[cell.cell_name] = {
             'pins': pinsetting,
             'parameters': paramsetting,
@@ -920,15 +936,18 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
             nd.put_stub(['lb', 'tl', 'rt', 'br'],
                 pinshape='arrow_righthalf',
                 pinsize=cfg.pin_settings['bbox_pin_size'],
-                pinlayer='bbox_pin', annotation_layer='bbox_pin_text')
+                pinlayer=cfg.pin_settings['bbox_pin_layer'],
+                annotation_layer='bbox_pin_text')
             nd.put_stub(['lt', 'tr', 'rb', 'bl'],
                 pinshape='arrow_lefthalf',
                 pinsize=cfg.pin_settings['bbox_pin_size'],
-                pinlayer='bbox_pin', annotation_layer='bbox_pin_text')
+                pinlayer=cfg.pin_settings['bbox_pin_layer'],
+                annotation_layer='bbox_pin_text')
             nd.put_stub(['lc', 'tc', 'rc', 'bc'],
                 pinshape='arrow_full',
                 pinsize=cfg.pin_settings['bbox_pin_size'],
-                pinlayer='bbox_pin', annotation_layer='bbox_pin_text')
+                pinlayer=cfg.pin_settings['bbox_pin_layer'],
+                annotation_layer='bbox_pin_text')
 
         if name:
             cellname(cellname=_paramsname, length=length, width=width, align='cc').\
@@ -959,7 +978,7 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
 
 #TODO: add flop
 def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
-        layermap=None, flip=False, scale=1.0, stubs=True, native=True,
+        layermap=None, cellmap=None, flip=False, scale=1.0, stubs=True, native=True,
         bbox=False, bboxbuf=0, prefix='', instantiate=None):
     """Load a gds cell and the corresponding pin info from file.
 
@@ -1008,6 +1027,7 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
             cellname=cellname,
             newcellname=newcellname,
             layermap=layermap,
+            cellmap=cellmap,
             scale=scale,
             native=native,
             bbox=bboxgds,
@@ -1042,6 +1062,116 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
     return C
 
 
+def _PIL2array(img):
+    return np.array(img.getdata(), np.bool).reshape(img.size[1], img.size[0])
+
+
+def image(name, layer=1, size=256, pixelsize=1, threshold=0.5,
+        cellname=None, invert=False, align='cc', box_layer=None, box_buf=0):
+    """Read an image file and return a nazca cell with the image.
+
+    Image format can be png, jpg, gif, bpm, eps and others, as supported by Pillow.
+    Note that the output resolution (size) does not exceed the image resolution.
+    Increase <pixelsize> in this case to obtain a larger logo in gds.
+
+    A rectangular box can be added around the logo by providing a <box_layer>.
+    This box can be enlarged beyond the original image size by setting <box_buf> > 0.
+
+    Args:
+        name (str): name of the image file
+        layer (int): layer number that the image will be written to (default 1)
+        size (int): maximum bounding box size in pixels (default 256)
+        pixelsize (float): pixel size in micron (default 1)
+        threshold (float): black/white threshold (default 0.5)
+        cellname (str): Nazca cell name (default image filename)
+        invert (bool): flag to invert black & white (default False)
+        align (str): two character string for image alignment (default 'cc')
+            allowed:
+            lt, ct, rt,
+            lc, cc, rc,
+            lb, cb, rb
+
+        box_layer (str | int | tuple): layer reference to generate a rectangular
+            box behind the text, e.g. for tiling exclusion areas (NOFILL)
+            (default = None)
+        box_buf (float): extra buffer for the box_layer in um
+
+    Returns:
+        Cell: cell with image
+
+    Examples:
+        Load a logo in a cell and put and/or export it to gds::
+
+            import nazca as nd
+
+            logo = nd.image('mylogo.png', align='lb') # left/bottom alignment
+            logo.put(0)
+            nd.export_gds()
+
+        or::
+
+            import nazca as nd
+
+            nd.export_gds(logo, filename='mylogo.gds')
+    """
+    if cellname is None:
+        cellname = os.path.basename(name)
+    p = pixelsize
+    threshold = int(threshold * 256)
+    a = {'lb', 'cb', 'rb', 'lc', 'cc', 'rc', 'lt', 'ct', 'rt'}
+    if align not in a:
+        print("Invalid alignment specification '{}' for image '{}'.".format(align, name))
+        print("Allowed values are {}.".format(a))
+        print("Using default value 'cc'")
+        align = 'cc'
+    halign = {'l': 0, 'c': -0.5, 'r': -1}
+    valign = {'b': 0, 'c': -0.5, 't': -1}
+
+    im = Image.open(name)
+    gray = im.convert('L')
+    # resize keep aspect, only if smaller
+    gray.thumbnail((size, size), Image.ANTIALIAS)
+    bw = gray.point(lambda x: 0 if x<threshold else 255, '1')
+    pix = _PIL2array(bw)
+    width, height = bw.size
+    width_tot = width*p + 2*box_buf
+    height_tot = height*p + 2*box_buf
+    print('Generating {}x{} pixels image of {:.0f}x{:.0f} um2, edge is {} um.'.\
+         format(width, height, width*p, height*p, box_buf))
+    h0 = halign[align[0]] * width_tot
+    v0 = valign[align[1]] * height_tot
+
+    with nd.Cell(cellname) as C:
+        for line in range(height):
+            x1 = x0 = lb = lw = 0
+            y0 = (height - line) * p
+            for pixel in pix[line]:
+                if pixel == invert:
+                    lb += 1
+                    if lw > 0:
+                        x0 += lw * p
+                        lw = 0
+                else:
+                    lw += 1
+                    if lb > 0:
+                        x1 = x0 + lb * p
+                        xy = [(x0, y0), (x1, y0), (x1, y0-p), (x0, y0-p)]
+                        nd.Polygon(layer=layer, points=xy).\
+                            put(h0+box_buf, v0+box_buf, 0)
+                        x0 = x1
+                        lb = 0
+            if lb > 0:
+                x1 = x0 + lb * p
+                xy = [(x0, y0), (x1, y0), (x1, y0-p), (x0, y0-p)]
+                nd.Polygon(layer=layer, points=xy).\
+                    put(h0+box_buf, v0+box_buf, 0)
+
+        if box_layer is not None:
+            nd.Polygon(layer=box_layer, points=[(0, 0), (0, height_tot),
+                (width_tot, height_tot), (width_tot, 0)]).put(h0, v0, 0)
+    return C
+
+
 # =============================================================================
 # predefined example cell for documentation examples
 # =============================================================================
@@ -1060,10 +1190,19 @@ def example_cell():
 
 dir_path = os.path.dirname(os.path.abspath(__file__))
 
-def nazca_logo(layers={'ring':1, 'box':2, 'bird':3}, cell_name='nazca_logo'):
-	return load_gdsBB(
-		gdsfilename=os.path.join(dir_path, 'nazca_logo.gds'),
+def nazca_logo(layers={'ring':1, 'box':2, 'bird':3}, cell_name='nazca_logo',
+        scale=1.0):
+    """Return the nazca logo as a cell.
+
+    Args:
+        layers (dict): gds layers of the logo. default = {'ring':1, 'box':2, 'bird':3}
+        cell_name (str): default = 'nazca_logo'
+        scale (float): scaling factor (default = 1)
+    """
+    return load_gdsBB(
+	    gdsfilename=os.path.join(dir_path, 'nazca_logo.gds'),
 		cellname='nazca',
 		newcellname=cell_name,
-		layermap={1:layers['ring'], 2:layers['box'], 3:layers['bird']})
+        scale=1.0,
+	    layermap={1:layers['ring'], 2:layers['box'], 3:layers['bird']})
 

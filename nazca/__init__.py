@@ -36,7 +36,6 @@ from .slabsolver import *
 from .xsection import *
 from .plotting import *
 from .gds import *
-from .lyp import *
 from .util import *
 from .extras import *
 from .convert_AWGtxt2nazca import *

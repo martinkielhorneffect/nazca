@@ -37,6 +37,7 @@ import array
 from numpy import int32, int64
 import datetime
 from itertools import groupby
+from math import floor
 
 # Map angle to [0, 360>
 def map_0_360(a):
@@ -83,7 +84,7 @@ gds_db_unit = 0.000000001
 gds_db_user = 0.001
 
 def round_to_db_unit(x):
-    return int(round(x/gds_db_user))
+    return floor(x/gds_db_user+0.5)
 
 # .pack will check for out of range values.
 def pack_uint8(B): # unsigned

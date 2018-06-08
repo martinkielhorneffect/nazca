@@ -340,10 +340,11 @@ def Tp_icon_grating(layer=None):
             N = int(length/(2*w))
 
         with nd.Cell('icon', instantiate=False) as icon:
-            rec = geom.rectangle(w, h, position=5)
-
+            t, u, v = w/4, w/2, h/2
+            cross = [(u,t),(u,v),(-u,v),(-u,t),(-w,t),(-w,-t),(-u,-t),
+                    (-u,-v),(u,-v),(u,-t),(w,-t),(w,t)]
             for i in range(N):
-                nd.Polygon(points=rec, layer=layer).put(0+i*w*2)
+                nd.Polygon(points=cross, layer=layer).put(0+i*w*2)
 
             nd.Pin('cc').put((N-1)*w)
         return icon

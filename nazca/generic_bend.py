@@ -1,20 +1,61 @@
+#-----------------------------------------------------------------------
+# This file is part of Nazca.
+#
+# Nazca is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or (at
+# your option) any later version.
+#
+# Nazca is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with Nazca.  If not, see <http://www.gnu.org/licenses/>.
+#
+# 2018 (c) X. Leijtens
+#-----------------------------------------------------------------------
+# -*- coding: utf-8 -*-
+
+"""
+Module to generate parametric waveguide curves or 'pcurves'.
+
+Polyline approximations of the curve are generated.
+
+The pcurves are based on
+Francois Ladouceur and Pierre Labeye,
+"A New General Approach to Optical Waveguide Path Design",
+Journal of Lightwave Technology, vol. 13, no. 3, march 1995.
+
+The algorithm tries to construct a curve that matches the
+input and output radius, and position, while maximizing the radius along
+the curve. Patent expired.
+
+The radius arguments in this module are sensitive to the sign.
+A positive radius indicates a counter-clockwise direction.
+"""
+
 from scipy.optimize import fminbound, minimize_scalar
 from math import sin,cos,radians,sqrt,log,pi
 import nazca as nd
 from nazca.util import polyline_length
 
+
 def dist_perp(P, A, B):
-    '''Calculate the distance of point P to a line through A and B
-    (perpendicular distance).
+    """Calculate the shortest distance of point P to a line through A and B.
+
+    Note that the shortest distance is the perpendicular distance
+    from P to line AB.
 
     Args:
-        P (x,y): target point
-        A (x,y): first point on line
-        B (x,y): second point on line
+        P (float, float): (x, y) target point
+        A (float, float): (x, y) first point on line
+        B (float, float): (x, y) second point on line
 
     Returns:
-        distance squared
-    '''
+        float: distance squared
+    """
     a = [P[0] - A[0], P[1] - A[1]]
     b = [B[0] - A[0], B[1] - A[1]]
     ab = a[0]*b[0]+a[1]*b[1]
@@ -23,63 +64,71 @@ def dist_perp(P, A, B):
          a[1] - ab / bb * b[1]]
     return sqrt(D[0]*D[0]+D[1]*D[1])
 
-
-# This implements a P-curve type connection. Original code by Daniele
-# Melati and Emil Kleijn, adapted for Nazca by Xaveer Leijtens. Based on
-# Francois Ladouceur and Pierre Labeye, "A New General Approach to Optical
-# Waveguide Path Design", Journal of Lightwave Technology, vol. 13, no. 3,
-# march 1995 The algorithm tries to construct a curve that matches the
-# input and output radius, and position, while maximizing the radius along
-# the curve. Patent expired.
-
-# The radius arguments are sensitive to the sign. A positive R indicates a
-# counter-clockwise direction.
-
 X = list()
 Z = list()
 
-def getCurvature (A, B, L):
-    """Return the local curvature at a given point t of parametrized curve
-    P(L) = (A(L),B(L)) along the P-Curve
+
+def getCurvature (A, B, Lp):
+    """Return the local curvature at a given point L of parametrized curve.
+
+    P(Lp) = (A(Lp), B(Lp)) along the P-Curve
+
+    For local curvature see:
+    http://en.wikipedia.org/wiki/Curvature#Local_expressions
 
     Args:
-        A (array): coefficients
-        B (array): coefficients
-        L (float): parameter point L
+        A (list of float): six coefficients
+        B (list of float): six coefficients
+        Lp (float): scaled curve-parameter point
 
     Returns:
-        local curvature
+        float: local curvature
     """
     dx = ddx = dy = ddy = 0
-    for i in range(1,6):
+    for i in range(1, 6):
       # Because x=A[i]*t^i -> dx/dL = ... dy/dL works similarly
-      dx += i*A[i]*L**(i-1)
-      dy += i*B[i]*L**(i-1)
+      dx += i*A[i]*Lp**(i-1)
+      dy += i*B[i]*Lp**(i-1)
       # and (d^2 x)/(d^2 L) = ... dy/dt works similarly
       if i > 1:
-        ddx += i*(i-1)*A[i]*L**(i-2)
-        ddy += i*(i-1)*B[i]*L**(i-2)
- 
-    # Local curvature, see
-    # http://en.wikipedia.org/wiki/Curvature#Local_expressions
-    return (ddx * dy - ddy * dx) * ((dx**2 + dy**2)**(-1.5))
+        ddx += i*(i-1) * A[i]*Lp**(i-2)
+        ddy += i*(i-1) * B[i]*Lp**(i-2)
 
-# InvertMatrix helper function returns the solution matrix as a function of L
-def InvertMatrix(L):
-    # This is the correct matrix. Please not that there is an error in the
-    # original paper (entry [3,6])
-    matrix = (
-        (       1,       0,       0  ,        0,       0,         0),
-        (       0,       1,       0  ,        0,       0,         0),
-        (       0,       0,       0.5,        0,       0,         0),
-        (-10/L**3, -6/L**2, -3/2/L   ,  10/L**3, -4/L**2,  1/2/L   ),
-        ( 15/L**4,  8/L**3,  3/2/L**2, -15/L**4,  7/L**3, -1/L**2  ),
-        ( -6/L**5, -3/L**4, -1/2/L**3,   6/L**5, -3/L**4,  1/2/L**3))
+    return (ddx*dy - ddy*dx) * ((dx**2 + dy**2)**(-1.5))
+
+
+def InvertMatrix(Lp):
+    """InvertMatrix helper function returns the solution matrix as a function of L.
+
+    Args:
+        L t(float): scaled curve-parameter point
+
+    Returns:
+        tuple of float: 6x6 matrix
+    """
+    # This is the correct matrix. Please note that there is an error in the
+    # original paper (entry [3, 6])
+    matrix = \
+       ((        1,        0,        0  ,         0,        0,          0),
+        (        0,        1,        0  ,         0,        0,          0),
+        (        0,        0,        0.5,         0,        0,          0),
+        (-10/Lp**3, -6/Lp**2, -3/2/Lp   ,  10/Lp**3, -4/Lp**2,  1/2/Lp   ),
+        ( 15/Lp**4,  8/Lp**3,  3/2/Lp**2, -15/Lp**4,  7/Lp**3,   -1/Lp**2),
+        ( -6/Lp**5, -3/Lp**4, -1/2/Lp**3,   6/Lp**5, -3/Lp**4,  1/2/Lp**3))
     return matrix
 
-def curve_AB(L):
+
+def curve_AB(Lp):
+    """Calculate array A and array B for given L.
+
+    Args:
+        Lp (float): scaled curve-parameter point
+
+    Returns:
+        (list of float, list of float): six elements A, six elements B
+    """
     global X, Z
-    matrix = InvertMatrix(L)
+    matrix = InvertMatrix(Lp)
 
     # Compute the coefficient
     A = [0, 0, 0, 0, 0, 0]
@@ -90,22 +139,49 @@ def curve_AB(L):
             B[i] = B[i] + matrix[i][t] * Z[t]
     return (A, B)
 
+
 def maxcurvature(L):
+    """Calculate the maximum curvature along L.
+
+    There is an ambiguity when the maximum curvature occurs at the input
+    or output position. Many paths in between then satisfy the curvature
+    requirement. We therefore multiply by log(length) to favor short
+    connections without affecting the result much.
+
+    Args:
+        L (float): scaled curve-parameter size
+
+    Returns:
+        float: maximum curvature
+    """
     # Only this many points for the maximum curvature finding.
     Npoints = 100
 
     global X, Z
     A, B = curve_AB(L)
-    curvature = [getCurvature(A,B,L/(Npoints-1)*i) for i in range(Npoints)]
+    curvature = [getCurvature(A, B, L/(Npoints-1)*i) for i in range(Npoints)]
     maxcur =  abs(max(curvature, key=abs))
 
-    # There is an ambiguity when the maximum curvature occurs at the input
-    # or output position. Many paths inbetween then satisfy the curvature
-    # requirement. We therefore multiply by log(length) to favor short
-    # connections without affecting the result much.
     return maxcur * log(L) #  max curvature
 
+
 def gb_coefficients(xya, Rin=0, Rout=0):
+    """Calculate coefficients A, B and L.
+
+    Determine the optimum curve length so that the minimum Radius along
+    the curve is maximized. The center of the curve is defined by a polynomial
+    with coefficients A[] for x, and B[] for y.
+    The independent variable runs from 0 to L.
+
+    Args:
+        xya (tuple): (x, y, a) coordinate of final position
+        Rin (float): radius of curvature at start
+        Rout (float): radius of curvature at end
+
+    Returns:
+        list of float, list of float, float: array of six A, array of six B, L
+    """
+
     global X, Z
     # In the algorithm, a negative curvature indicates a counterclockwise
     # direction, while Nazca uses the sign of the angle instead (negative
@@ -136,7 +212,7 @@ def gb_coefficients(xya, Rin=0, Rout=0):
     # output) Note that this length is related to the physical length, but
     # not equal.
     minFindL = sqrt(zout**2+xout**2)/4
-    # and 3*the length of a straight line
+    # and 3* the length of a straight line
     maxFindL = sqrt(zout**2+xout**2)*3
 
     # Calculate initial known terms
@@ -154,52 +230,81 @@ def gb_coefficients(xya, Rin=0, Rout=0):
     X = [xin, dxin, ddxin, xout, dxout, ddxout]
     Z = [zin, dzin, ddzin, zout, dzout, ddzout]
 
-    # Determine the optimum curve length so that the minimum Radius along
+    # Determine the optimum curve length so that the minimum radius along
     # the curve is maximized
     L = fminbound(maxcurvature, minFindL, maxFindL, disp=1)
+    Rmin = 1/(maxcurvature(L)/log(L)) # minimum radius
+
     # Get the final matrix and extract the polynomial coefficients from it
     A, B = curve_AB(L)
     # The center of the curve is defined by a polynomial with coefficients
     # A[] for x, and B[] for y and the independent variable runs from 0 to L.
-    return A,B,L
+    return A, B, L, Rmin
 
-def gb_point(t, A, B, L):
+
+def gb_point(t, A, B, Lp):
+    """Calculate generic-bend point for parameter t.
+
+    Args:
+        t (): normalized parameter in range [0, 1].
+        A (list of float): array of six.
+        B (list of float): array of six.
+        Lp (float): scaled curve-parameter point, scales t.
+
+    Returns:
+        (float, float): generic bend point
+    """
     x = y = 0
     for i in range(6):
-        x += A[i]*(t*L)**i
-        y += B[i]*(t*L)**i
+        x += A[i]*(t*Lp)**i
+        y += B[i]*(t*Lp)**i
     return (x, y)
 
+
 def cbend_point(t, distance, offset):
+    """Calculate cosine bend point for parameter t.
+
+    Args:
+        t (float): normalized parameter in range [0, 1].
+        distance (float): scaling factor of x with t.
+        offset (float): scaling factor of y with t.
+
+    Returns:
+       (float, float): point (x, y) for given t
+    """
     x = t * distance
     if t > 0:
-        y = offset / 2 * (1 - cos(pi * t))
+        y = offset / 2*(1-cos(pi*t))
     else:
         y = 0
     return (x, y)
 
+
 def curve2polyline(fie, xya, acc, args=()):
-    '''Generate a polyline from a parameterized curve. Use a sufficient
-    number of points to ensure that the deviation of the sampled curve from
-    the real curve is less than the specified accuracy.
+    """Generate a polyline from a parameterized curve.
+
+    Use a sufficient number of points to ensure that the deviation of the
+    sampled curve from the real curve is less than the specified accuracy.
 
     Args:
         fie (function): the curve function that takes one parameter that
             runs from 0 to 1 as first argument. The curve starts at the
             origin at 0 angle.
-        xya: the position (x,y) and angle (a) in degrees, of the end point
-            of the curve.
+        xya (tuple): the position (x, y, a) of the end point of the curve.
+            Angle a in degrees.
         acc (float): desired accuracy in micrometer.
         args (tuple): additional arguments to be passed to the curve function.
 
     Returns:
-        a polyline approximation of the curve.
-    '''
+       list of (float, float): list of points (x, y);
+           a polyline approximation of the curve
+    """
     # As a starting point find the value for t where the y-coordinate is
     # equal to acc. Since the curve always starts horizontal, this gives a
     # good and easy value.
     def fun(x):
         return abs(fie(x, *args)[1]-acc)
+
     res = minimize_scalar(fun, bounds=(0, 0.04), method='bounded')
     dt0 = res.x
     t0 = dt0 / 2
@@ -207,7 +312,7 @@ def curve2polyline(fie, xya, acc, args=()):
     P1 = fie(0, *args)
     p = [P1]
     P1 = fie(t0, *args)
-    p.append((P1[0],0)) # First section has to be horizontal.
+    p.append((P1[0], 0)) # First section has to be horizontal.
     while t0 + dt0 < 1:
         P0 = P1
         P1 = fie(t0+dt0, *args)
@@ -243,30 +348,30 @@ if __name__ == "__main__":
     A, B, L = gb_coefficients(xya, Rin=0, Rout=0)
     xy = curve2polyline(gb_point, xya, 0.1, (A, B, L))
     xy = nd.util.polyline2polygon(xy, width=2)
-    nd.Polygon(layer=202, points=xy).put(0,0,10)
+    nd.Polygon(layer=202, points=xy).put(0, 0, 10)
     xy = curve2polyline(gb_point, xya, 0.001, (A, B, L))
     xy = nd.util.polyline2polygon(xy, width=2)
-    nd.Polygon(layer=203, points=xy).put(0,0,10)
+    nd.Polygon(layer=203, points=xy).put(0, 0, 10)
 
     # Curve with different accuracy and curvature at start and finish.
     A, B, L = gb_coefficients(xya, Rin=300, Rout=-100)
     xy = curve2polyline(gb_point, xya, 0.1, (A, B, L))
-    nd.Polyline(layer=1, width=2, points=xy).put(0,0,10)
+    nd.Polyline(layer=1, width=2, points=xy).put(0, 0, 10)
     xy = curve2polyline(gb_point, xya, 0.001, (A, B, L))
-    nd.Polyline(layer=2, width=2, points=xy).put(0,0,10)
+    nd.Polyline(layer=2, width=2, points=xy).put(0, 0, 10)
 
     # Curves with different "length".
     A, B, L = gb_coefficients(xya, Rin=0, Rout=0) # sets X and Z
     for L in range(300, 2000, 100):
         A, B = curve_AB(L)
         xy = [ gb_point(t/1000, A, B, L) for t in range(1001) ]
-        nd.Polyline(layer=2, width=2, points=xy).put(500,0,10)
+        nd.Polyline(layer=2, width=2, points=xy).put(500, 0, 10)
 
     A, B, L = gb_coefficients(xya, Rin=300, Rout=-100) # sets X and Z
     for L in range(300, 2000, 100):
         A, B = curve_AB(L)
         xy = [ gb_point(t/1000, A, B, L) for t in range(1001) ]
-        nd.Polyline(layer=3, width=2, points=xy).put(500,0,10)
+        nd.Polyline(layer=3, width=2, points=xy).put(500, 0, 10)
 
     # Length calculation
     A, B, L = gb_coefficients(xya, Rin=300, Rout=-100) # sets X and Z
@@ -275,10 +380,10 @@ if __name__ == "__main__":
     print("Length of curve: {:.3f} µm".format(length))
 
     # Cosine bend
-    xy = curve2polyline(cbend_point, (100,20,0), 0.001, (100,20))
+    xy = curve2polyline(cbend_point, (100, 20, 0), 0.001, (100, 20))
     nd.Polyline(layer=2, width=2, points=xy).put(-300, 0, 0)
     xy = nd.util.polyline2polygon(xy, width=2)
-    nd.Polygon(layer=203, points=xy).put(-300,0,0)
+    nd.Polygon(layer=203, points=xy).put(-300, 0, 0)
 
     nd.export_gds()
 

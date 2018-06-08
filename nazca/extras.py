@@ -218,36 +218,34 @@ def target(layera=1, layerb=None):
     """Fiducial marker 'target' for machine vision.
 
     Args:
-        layer1 (layer): layer (or list of layers) in which the target is
-            written.
-        layer2 (layer): layer (or list of layers) in which etch background
-            is defined (trench).
+        layera (layer): layer in which the target is written.
+        layerb (layer): layer in which etch background is defined (trench).
         name (string): cell name.
 
     Returns:
         Cell: cell with this marker.
 
     Example:
-        Place marker centered at (0,0) in layer 1 and 2 with background
+        Place marker centered at (0,0) in layer 1 with background
         layer 12.
 
             import nazca as nd
 
-            f1 = nd.target(layera=(1,2), layerb=12)
+            f1 = nd.target(layera=1, layerb=12)
             f1.put()
 
             nd.export_plt()
     """
-    with nd.Cell(name='Fiducial_target_'+nd.md5((layer1,layer2))) as C:
-        nd.Polygon(layer=layer1,
+    with nd.Cell(name='Fiducial_target_'+nd.md5((layera,layerb))) as C:
+        nd.Polygon(layer=layera,
                 points=geom.rectangle(200, 10, position=5)).put()
-        nd.Polygon(layer=layer1,
+        nd.Polygon(layer=layera,
                 points=geom.rectangle(10, 200, position=5)).put()
-        nd.Polygon(layer=layer1,
+        nd.Polygon(layer=layera,
                 points=geom.ring(radius=35, width=10, N=41)).put()
-        nd.Polygon(layer=layer1,
+        nd.Polygon(layer=layera,
                 points=geom.ring(radius=70, width=10, N=81)).put()
-        nd.Polygon(layer=layer2,
+        nd.Polygon(layer=layerb,
                 points=geom.rectangle(225, 225, position=5)).put()
         nd.Pin(name='a0', xs=None).put(0,0,180)
         nd.Pin(name='b0', xs=None).put(0,0,0)
@@ -279,7 +277,7 @@ def cornerUL(layera=1, layerb=None):
 
             nd.export_plt()
     """
-    with nd.Cell(name='Fiducial_cornerUL_'+md5((layera,layerb))) as C:
+    with nd.Cell(name='Fiducial_cornerUL_'+nd.md5((layera,layerb))) as C:
         for lay in nd.make_iter(layera):
             nd.Polygon(layer=lay,
                     points=geom.rectangle(10, 125, position=5)).\

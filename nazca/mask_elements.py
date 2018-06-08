@@ -540,7 +540,7 @@ def Tp_ccurve(width=1, distance=200, offset=20, xs=None,
     return cell
 
 
-def Tp_pcurve(xya=(100,100,10), width=1.0, Rin=0, Rout=0, Oin=None,
+def Tp_pcurve(xya=(100, 100, 10), width=1.0, Rin=0, Rout=0, Oin=None,
         Oout=None, xs=None, layer=None, name=None):
     """Template for creating parametrized pcurve waveguide function.
 
@@ -591,11 +591,20 @@ def Tp_pcurve(xya=(100,100,10), width=1.0, Rin=0, Rout=0, Oin=None,
             xya = (xya[0], xya[1]-Oin, xya[2])
             nd.Pin(name='b0', width=width, xs=xs, show=True).put(*xya)
 
-            xya = (xya[0]-Oout*sin(np.radians(xya[2])),
-                xya[1]+Oout*cos(np.radians(xya[2])), xya[2])
+            xya = (xya[0] - Oout*sin(np.radians(xya[2])),
+                xya[1] + Oout*cos(np.radians(xya[2])), xya[2])
             # Solve the generic bend
-            A, B, L = gb_coefficients(xya, Rin=Rin, Rout=Rout)
+            A, B, L, Rmin = gb_coefficients(xya, Rin=Rin, Rout=Rout)
             pwg.length_geo = L
+
+            Rdrc = 1e8
+            try:
+                Rdrc = cfg.XSdict[xs].minimum_radius
+            except:
+                pass
+            if Rdrc > Rmin:
+                print('Warning: DRC minimum_radius {:.3f} < {:.3f}'.\
+                    format(Rmin, Rdrc))
 
             for lay, growx, growy, acc in layeriter(xs, layer, dogrowy=True):
                 # sampled curve

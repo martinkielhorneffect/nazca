@@ -384,15 +384,19 @@ class GDSII_element:
         #GDS: PATH [ELFLAGS] [PLEX] LAYER DATATYPE [PATHTYPE][WIDTH] XY
         if self.etype != gb.GDS_record.PATH:
             return None
-        layer, XY = None, None
+        layer, XY, pathtype, width = None, None, None, None
         for r in self.records[1:]:
             if r.rtype == gb.GDS_record.LAYER:
                 layer = r.data[0]
             elif r.rtype == gb.GDS_record.DATATYPE:
                 datatype = r.data[0]
+            elif r.rtype == gb.GDS_record.PATHTYPE:
+                pathtype = r.data[0]
+            elif r.rtype == gb.GDS_record.WIDTH:
+                width = r.data[0]
             elif r.rtype == gb.GDS_record.XY:
                 XY = r.data
-        return [(layer, datatype), XY]
+        return [(layer, datatype), XY, pathtype, width]
 
 
     @property

@@ -16,7 +16,7 @@
 # along with Nazca.  If not, see <http://www.gnu.org/licenses/>.
 #-----------------------------------------------------------------------
 #
-# @author: Ronald Broeke (c) 2016-2017, 2011 (c) Xaveer Leijtens,
+# @author: Ronald Broeke (c) 2016-2018, 2011 (c) Xaveer Leijtens,
 # @email: ronald.broeke@brightphotonics.eu
 #
 """
@@ -25,9 +25,9 @@ and from those the graphs/netlists of the design.
 """
 
 from itertools import count
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import copy as COPY
-from math import sin, cos, acos, pi
+from math import sin, cos, acos, pi, atan2
 
 from numpy.linalg import inv
 from numpy import dot
@@ -42,6 +42,7 @@ from . import gds_base as gb
 import nazca.trace as trace
 from nazca.pdk_template_core import put_boundingbox, bbox_pinnames
 
+
 Et = count(0) #counter for default cell names:
 elmlist = []
 Pt = count(0)
@@ -49,18 +50,24 @@ Pt = count(0)
 def to_mat(chain=0, x=0, y=0, a=0, inverse=False):
     """Transform vector into matrix."""
     a = (a+chain*180.0) / 180. * pi
+    c, s = cos(a), sin(a)
     if not inverse:
-        return np.array([[cos(a), sin(a), 0.0],
-                         [-sin(a), cos(a), 0.0],
+        return np.array([[ c, s, 0.0],
+                         [-s, c, 0.0],
                          [x, y, 1.0]])
     else:
-        return np.array([[cos(a), -sin(a), 0.0],
-                         [sin(a), cos(a), 0.0],
-                         [-x*cos(a)-y*sin(a), x*sin(a)-y*cos(a), 1.0]])
+        return np.array([[c, -s, 0.0],
+                         [s,  c, 0.0],
+                         [-x*c-y*s, x*s-y*c, 1.0]])
 
 def inverse(mat):
-    """Return inverse matrix"""
-    return inv(mat)
+    """Return inverse matrix of <mat>"""
+    c, s = mat[0, 0], mat[0, 1]
+    x, y = mat[2, 0], mat[2, 1]
+    return np.array([[c, -s, 0.0],
+                     [s,  c, 0.0],
+                     [-x*c-y*s, x*s-y*c, 1.0]])
+    #return inv(mat) # ~4x slower
 
 
 class Pointer():
@@ -72,25 +79,15 @@ class Pointer():
     converted to the global coordinate system by a matrix multiplication. By
     using homogeneous coordinates, translations are also described by a
     matrix multiplication.
-
-    .. figure:: _static/Pointer.png
-        :height: 100px
-        :alt: alternate text
-
-       *fig: pointer*
-
-    :argument x: x-coordinate of the pointer position [µm]
-    :argument y: y-coordinate of the pointer position [µm]
-    :argument a: angle of the pointer [degrees]
     """
 
     def __init__(self, x=0.0, y=0.0, a=0.0):
         """Constructor.
 
         Args:
-            x (float): x coordinate
-            y (float): y coordinate
-            a (float): angle coordinate
+            x (float): x coordinate in um
+            y (float): y coordinate in um
+            a (float): angle coordinate un degrees
         """
         self.flipstate = False
         self.mat = None
@@ -99,9 +96,8 @@ class Pointer():
 
 
     def __str__(self):
-        xy = self.get_xy()
-        return ("%s:\t(x = %.2f, y = %.2f, a = %.2f°)"
-                % (self.__class__.__name__, xy[0], xy[1], self.a))
+        return "{0}:\t(x = {2:.2f}, y = {3:.2f}, a = {1:.2f}°)".\
+            format(self.__class__.__name__, self.a, *self.get_xy())
 
 
     def goto(self, x, y, a=0.0):  # Absolute
@@ -204,6 +200,7 @@ class Pointer():
         self.mat = inv(self.mat)
         return self
 
+
     def trans(self, mat):  # Relative
         """Translate pointer by matrix <mat>.
 
@@ -216,6 +213,9 @@ class Pointer():
     def chain180(self, chain):
         """Set the chain property of the pointer.
 
+        Args:
+            chain (bool): True for chain connecting pins.
+
         Returns:
             None
         """
@@ -225,8 +225,10 @@ class Pointer():
     def set_mat(self, t):  # Relative
         """Fill pointer matrix based on vector <t> = (x, y, a).
 
+        Args:
+            t (tuple): (x, y, a)
         Returns:
-
+           None
         """
         self.mat = t
 
@@ -234,8 +236,11 @@ class Pointer():
     def skip(self, s):  # move forward (negative: backward)
         """Translate a pointer in the direction it is pointing in.
 
+        Args:
+            s (float): move pointer along its direction by <s>
+
         Returns:
-            Pointer: self
+            Pointer: self, moved
         """
         self.move(s, 0, 0)
         return self
@@ -244,20 +249,29 @@ class Pointer():
     def offset(self, s):  # offset positive/negative to left/right.
         """Translate a pointer perpendicular to the direction it is pointing in.
 
+        Note that in a cartesian coordinate system while pointing/looking
+        along the positive x-axis, a positive offset is in the left direction,
+        i.e. along the positive y-axis.
+
+        Args:
+            s (float): move pointer along perpendicular direction by <s>
+
         Returns:
-            None
+            Pointer: self, moved pointer
         """
         self.move(0, s, 0)
+        return self
 
 
     def flip(self):
         """Flip (mirror) the state of the pointer.
 
         Returns:
-            None
+            Pointer: self, flipped
         """
         self.mat = dot(self.mat, [[1, 0, 0], [0, -1, 0], [0, 0, 1]])
         self.flipstate = not self.flipstate
+        return self
 
 
     def rotate(self, a):
@@ -267,7 +281,7 @@ class Pointer():
             a (float): angle of the pointer [degrees]
 
         Returns:
-            Pointer: self
+            Pointer: self, rotated
         """
         self.move(0, 0, a)
         return self
@@ -301,6 +315,7 @@ class Pointer():
 
 
     def get_xya(self):
+        """Return the pointer position as (x, y, a)."""
         return (self.x, self.y, self.a)
 
 
@@ -312,6 +327,11 @@ class Pointer():
     def xya(self):
         """Return the pointer position as (x, y, a)."""
         return (self.x, self.y, self.a)
+
+
+    def xy(self, x=0, y=0):
+        """Return the (x, y) position of the pointer."""
+        return tuple(dot([x, y, 1], self.mat))[0:2]
 
 
     def copy(self, flip=False):
@@ -348,13 +368,14 @@ class Node():
     """Node class for creating node objects.
 
     The netlist of Nodes and connections between the nodes (edges) construct
-    the photonic circuit and or layout.
+    the photonic circuit and/or layout.
     """
+
     def __init__(self, name=None):
         """Contruct a Node.
 
         Args:
-            name (str): optional Node name (default is an interger counter)
+            name (str): optional Node name (default is an integer counter)
 
         Returns:
             None
@@ -396,7 +417,15 @@ class Node():
         """Copy a Node object.
 
         Returns:
-            Node: copy of the node with the same attribute settings as the original"""
+            Node: copy of the node with the same attributes as the original
+
+        Example::
+
+            import nazca as nd
+
+            n1 = nd.Node()
+            n2 = n1.copy()
+        """
         # do NOT use deepcopy: extremely slow.
         node = Node()
         node.pointer = self.pointer.copy()
@@ -422,10 +451,15 @@ class Node():
 
 
     def goto(self, x=0, y=0, a=0):
-        """Goto position (<x>, <y>, <a>) with repect to celll origin 'org'.
+        """Create a new Node at position (<x>, <y>, <a>) relative to the cell origin.
+
+        Args:
+            x (float): x position in um
+            y (float): y position in um
+            a (float): angle a in degrees
 
         Returns:
-            Node: a new Node after translating by vector (<x>, <y>, <a>)
+            Node: a new Node at (<x>, <y>, <a>) w.r.t. the cell's origin
         """
         node = Node()
         node.pointer = COPY.copy(self.pointer)
@@ -442,96 +476,135 @@ class Node():
         return node
 
 
+    def xya(self):
+        """Get pointer position of the Node.
+
+        Returns:
+            tuple: pointer position (x, y, a) with respect to the cell origin
+        """
+        return self.pointer.get_xya()
+
+    @property
+    def x(self):
+        """Get pointer x-position of the Node.
+
+        Returns:
+            tuple: pointer x-position with respect to the cell origin
+        """
+        return self.pointer.x
+
+
+    @property
+    def y(self):
+        """Get pointer y-position of the Node.
+
+        Returns:
+            tuple: pointer y-position with respect to the cell origin
+        """
+        return self.pointer.y
+
+    @property
+    def a(self):
+        """Get pointer a-position of the Node.
+
+        Returns:
+            tuple: pointer a-position with respect to the cell origin
+        """
+        return self.pointer.a
+
 #==============================================================================
 #     Create pointer operations on Node level for syntax convenience
 #==============================================================================
     def move(self, x=0, y=0, a=0):
-        """Move pointer in Node by (<x>, <y>, <a>).
+        """Create a new Node translated by (<x>, <y>, <a>) with respect to self.
 
         Returns:
-            Node: a new Node after translating by vector (<x>, <y>, <a>)
+            Node: a new Node translated by vector (<x>, <y>, <a>)
         """
         node = self.copy()
         connect_geo(self, node, (x, y, a), 0, 0)
-        #cfg.cp = node
         return node
 
 
     def rotate(self, a=0):
-        """Rotate pointer by <a>.
+        """Create a new Node rotate pointer by <a>.
 
         Args:
             a (float): angle of rotation in degrees
 
         Returns:
-            Node: a new Node after translating by vector (0, 0, <a>)
+            Node: a new Node translated by vector (0, 0, <a>) w.r.t. self
         """
         node = self.copy()
         connect_geo(self, node, (0, 0, a), 0, 0, DRC=False)
-        #cfg.cp = node
         return node
     rot = rotate
 
 
     def skip(self, x=0):
-        """Skip pointer in Node a distance <x> in direction of the pointer.
+        """Create a new Node skipping <x> in direction of the pointer.
 
         Returns:
-            Node: a new Node after translating by vector (<x>, 0, 0)
+            Node: a new Node translated by vector (<x>, 0, 0) w.r.t. self
         """
         node = self.copy()
         connect_geo(self, node, (x, 0, 0), 0, 0 )
-        #cfg.cp = node
         return node
 
 
     def shift(self, x=0, y=0):
-        """Shift pointer (<x>, <y>) and keep orientation.
+        """Create a new Node shifting pointer (<x>, <y>), keeping orientation.
 
         Returns:
-            Node: a new Node after translating by vector (<x>, <y,> 0)
+            Node: a new Node translated by vector (<x>, <y,> 0) w.r.t. self
         """
         node = self.copy()
         connect_geo(self, node, (x, 0, 0), 0, 0 )
-        #cfg.cp = node
         return node
 
 
     def offset(self, y=0):
-        """Offset the pointer of the Node by <y>.
+        """Create a new Node that is offset by <y>.
 
         Returns:
-            Node: new Node after translating by vector (0, <y>, 0)
+            Node: a new Node translated by vector (0, <y>, 0) w.r.t. self
         """
         node = self.copy()
-        connect_geo(self, node, (0, -y, 0), 0, 0 )
-        #cfg.cp = node
+        connect_geo(self, node, (0, y, 0), 0, 0 )
         return node
     os = offset
 
 
-   # def roll(self):
-   #     """Roll around the x-axis. (Mirror in the xaxis)"""
-   #     node = self.copy()
-   #     connect_geo(self, node, (0, 0, 0), 0, 0 )
-   #     #cfg.cp = node
-   #     return node
+    def flip():
+        """Create a new Node that is flipped.
 
-
-    #def mirror(self):
-    #    node = self.copy()
-    #    connect_geo(self, node, (0, 0, 0), 0, 0 )
-    #    #cfg.cp = node
-    #    return node
-
-
-    def xya(self):
-        """Get pointer position of the Node.
+        A 'flip' mirrors the Node in the line of the pointer.
+        Note that a flip state of a Node doesn't matter in Nazca.
+        Flipping is handled by 'put', hence this funtion is equivalent to
+        a Node copy in place (pointer not effected).
 
         Returns:
-            (x, y, a): pointer position
+            Node: a new Node flipped w.r.t. self
         """
-        return self.pointer.get_xya()
+        node = self.copy()
+        connect_geo(self, node, (0, 0, 0), 0, 0 )
+        return node
+
+
+    def flop():
+        """Create a new Node that is flopped.
+
+        A 'flop' mirrors the Node pointer 'backward'.
+        A flop is effecively a flip + 180 degree rotation.
+        Note that the flip state of a Node or not doesn't matter in Nazca,
+        hence this flop is equivalent to rot(180).
+
+        Returns:
+            Node: a new Node flopped w.r.t. self
+        """
+        node = self.copy()
+        connect_geo(self, node, (0, 0, 0), 0, 0 )
+        return node
 
 
 #==============================================================================
@@ -579,6 +652,8 @@ class Node():
         for nn in self.nb_cnode:
             if nn[2] == 1:
                 yield nn[0]
+
+    instance_iter = cnode_nb_iter
 
 
     def print_neighbours(self):
@@ -633,7 +708,6 @@ def connect_geo(pin1, pin2, t=(0, 0, 0), chain_node=0, chain_connect=None,
             chain_connect = 1 -> no-chain pin,
         (default = None)
         DRC (bool): apply DRC on the edge (default = True)
-
 
     Returns:
         None
@@ -716,7 +790,8 @@ def connect_cnode(n1, n2, s):
     n2.nb_cnode.append((n1, s, -1, 0))
 
 
-def parse_pin(C1=None, C2=None, C3=None, C4=None, instance=None, rot=False, default='out'):
+def parse_pin(C1=None, C2=None, C3=None, C4=None, instance=None, rot=False,
+        default='out'):
     """
     Parse the part of the put statement after a potential first string arg.
 
@@ -760,16 +835,16 @@ def parse_pin(C1=None, C2=None, C3=None, C4=None, instance=None, rot=False, defa
        P = C2
        try:
            x = float(C1[0])
+           try:
+               y = float(C1[1])
+               try:
+                   a = float(C1[2])
+               except:
+                   a = 0
+           except:
+               y, a = 0, 0
        except:
-           x = 0
-       try:
-           y = float(C1[1])
-       except:
-           y = 0
-       try:
-           a = float(C1[2])
-       except:
-           a = 0
+           x, y, a = 0, 0, 0
 
     else:
         try:
@@ -1006,7 +1081,7 @@ class Cell():
     """
 
     def __init__(self, name='cell', celltype='element', instantiate=True,
-            autobbox=False, hashme=False, cnt=False):
+            autobbox=False, store_pins=None, hashme=False, cnt=False):
         """Construct a Cell.
 
         Args:
@@ -1093,6 +1168,11 @@ class Cell():
         self.bbox = None
         self.autobbox = autobbox
         self.bboxbuf= 0
+        self.userbbox = None
+        if store_pins is None:
+            self.store_pins = cfg.store_pins
+        else:
+            self.store_pins = store_pins
 
         #pin handling:
         self.oldcp = cfg.cp
@@ -1241,8 +1321,9 @@ class Cell():
             return instance.pin[self.default_in], C1, (0, 0, 0)
         elif isinstance(C1, Instance):
             if not C1.cnode.ininstance and C1.cnode.cell.closed:
-                raise Exception("Trying to connect to a close cell. Try using an instance instead.")
-            return instance.pin[self.default_in], C1.pin[C1.cnode.cell.default_out], (0, 0, 0)
+                raise Exception("Trying to connect to a close cell. "\
+                    "Try using an instance instead.")
+            return instance.pin[self.default_in], C1.pin[C1.cnode.cell.default_out],(0, 0, 0)
 
         elif isinstance(C1, str):
             pin2, T = parse_pin(C2, C3, C4, C5, instance)
@@ -1262,7 +1343,7 @@ class Cell():
             Node, (x, y, a): pin, translation
 
         Example:
-            In case of provinding floats:
+            In case of providing floats:
             * ()
             * (node)
             * (0,)
@@ -1284,26 +1365,28 @@ class Cell():
             return cfg.cp, (0, 0, 0)
         elif isinstance(C1, Node):  #Node
             if not C1.cnode.ininstance and C1.cnode.cell.closed:
-                raise Exception("Trying to connect to a close cell. Instantiate the cell first and connect to the instance.")
+                raise Exception("Trying to connect to a pin in a closed cell. "\
+                    "Instantiate the cell first and connect to the instance.")
             return C1, (0, 0, 0)
         elif isinstance(C1, Instance):  #Node
             if not C1.cnode.ininstance and C1.cnode.cell.closed:
-                raise Exception("Trying to connect to a close cell. Instantiate the cell first and connect to the instance.")
+                raise Exception("Trying to connect to a close cell. "\
+                    "Instantiate the cell first and connect to the instance.")
             return C1.pin[C1.cnode.cell.default_out], (0, 0, 0)
 
         if isinstance(C1, tuple):
             try:
                 x = float(C1[0])
+                try:
+                    y = float(C1[1])
+                    try:
+                        a = float(C1[2])
+                    except:
+                        a = 0
+                except:
+                    y, a = 0, 0
             except:
-                x = 0
-            try:
-                y = float(C1[1])
-            except:
-                y = 0
-            try:
-                a = float(C1[2])
-            except:
-                a = 0
+                x, y, a = 0, 0, 0
             if isinstance(C2, str):
                 return self.pin[C2], (x, y, a)
             else:
@@ -1453,14 +1536,14 @@ class Cell():
                 cellname='name', newcellname='new')
         """
         node = self._put_pin(connect=connect)
-        self.gdsfiles.append((node, filename, cellname, newcellname, layermap,
-            cellmap, scale, strm))
+        self.gdsfiles.append((node,
+            (filename, cellname, newcellname, layermap, cellmap, scale, strm)))
         #print('put_gds node {}, pinname {} = '.format(node, pinname))
         return None
 
 
     I = 0
-    def _copy_cell2instance(self, parent_cnode, flip, flop, array):
+    def _copy_cell2instance(self, parent_cnode, flip, flop, array=None):
         """Copy all nodes from the Cell into an Instance.
 
         Args:
@@ -1477,22 +1560,22 @@ class Cell():
         instance = Instance()
 
         flipflop = flip != flop
-        try:
-            if array is not None:
+        if array is not None:
+            try:
                 A = array
                 array = [ A[0], [ A[1][0]*A[0], A[1][1]*A[0] ], \
                           A[2], [ A[3][0]*A[2], A[3][1]*A[2] ] ]
                 if not self.instantiate:
                     print(
-"Warning: Trying to set array {} on cell '{}' with instantiate = False."\
+"Warning: Trying to set array {} on cell '{}' with instantiate=False."\
 " Only a single instance will be visible."\
-" Set instantiate=True to obtain the full array GDS.".\
+" Set instantiate=True to obtain the full array in GDS.".\
                     format(array, self.cell_name))
-        except:
-            print("Error: incompatible array format {} when placing cell '{}' in '{}'."\
-                " Array will be ignored.".\
-                format(array, self.cell_name, parent_cnode.cell.cell_name))
-            array = None
+            except:
+                print("Error: incompatible array format {} when placing "\
+                    "cell '{}' in '{}'. Array will be ignored.".\
+                    format(array, self.cell_name, parent_cnode.cell.cell_name))
+                array = None
 
         # cnode:
         node = Node()
@@ -1554,8 +1637,8 @@ class Cell():
                 A flop is the same as rot(180) + a flip
                 Hint: for mask assembly or connecting bbox pins you may find both
                 flip and flop useful.
-            cp (str): Set current pin cp to a specific pin after putting (default = 'b0')
-                Example: cp='b1'
+            cp (str): Set current pin cp to a specific pin after putting
+                (default = 'b0'). Example: cp='b1'
             array (list): creates an array instance upon GDS output if not None.
                 Format the array as [col#, [dx1, dy1], row#, [dx2, dy2]]
                 (default = None)
@@ -1584,7 +1667,7 @@ class Cell():
                 nd.example_cell().put('b0') # -> put('b0', cp)
                 nd.export_plt()
 
-            3. connec default pin of cell "example_cell()" to its parent cell at org + (10, 20, 30)::
+            3. connect default pin of cell "example_cell()" to its parent cell at org + (10, 20, 30)::
 
                 import nazca as nd
                 nd.example_cell().put(10, 20, 30) # -> put('a0').move(10, 20, 30)
@@ -1614,17 +1697,9 @@ class Cell():
                 nd.export_plt()
         """
 
-        C1, C2, C3, C4, C5 = None, None, None, None, None
-        try: C1 = args[0]
-        except: pass
-        try: C2 = args[1]
-        except: pass
-        try: C3 = args[2]
-        except: pass
-        try: C4 = args[3]
-        except: pass
-        try: C5 = args[4]
-        except: pass
+        C = [None] * 5
+        for i, arg in enumerate(args):
+            C[i] = arg
 
         active_cell = cfg.cells[-1]
         parent_cnode = active_cell.cnode
@@ -1633,8 +1708,7 @@ class Cell():
                 format(active_cell.cell_name))
 
         instance = self._copy_cell2instance(parent_cnode, flip, flop, array)
-        nodeI, nodeC, T = self.parse_instance_connection(C1, C2, C3, C4, C5,
-            instance=instance)
+        nodeI, nodeC, T = self.parse_instance_connection(*C, instance=instance)
         if flop:
             T = (T[0], T[1], T[2]+180)
         connect_geo(nodeC, nodeI, T)
@@ -1680,10 +1754,39 @@ class Cell():
         return instance
 
 
+    def rebuild(self, instantiate=True, flat=False, layermap=None,
+        layermapmode=None, cellmap=None):
+        """Flatten, rename, relayer, reshape and/or filter a Nazca Cell object.
+
+        The original cell(tree) remains unchanged.
+        This method operates at mask-element level. It contructs the output
+        cell(tree) as geometrical info from the ground up, i.e.
+        any circuit-type netlist information will not be copied.
+        Rebuild can be used, for example, to place
+        each layer of a cell at a different position in the mask layout.
+
+        Args:
+            instantiate (bool): instantiate setting of returned (top)cell.
+                (default = True)
+            flat (bool): flatten cell(tree) (default = False)
+            layermap (dict): {oldlayer, newlayer} mapping
+            cellmap (dict): to be implemented
+            layermapmode ('all' | 'none'): start mapping with all layers
+                included in the map: 'all', or an empty map 'none'.
+                (default = 'all')
+
+        Returns:
+            Cell: rebuilt input cell
+        """
+        return layout.rebuild(cell=self, instantiate=instantiate, flat=flat,
+            layermap=layermap, layermapmode=layermapmode)
+
+
     def __str__(self):
         """Print which structures are contained in the cell."""
         s = 'cell info of \'{}\''.format(self.cell_name)
-        s += '\n--pin     {:2}x              = {}'.format(len(self.pin.keys()), self.pin.keys())
+        s += '\n--pin     {:2}x              = {}'.\
+            format(len(self.pin.keys()), self.pin.keys())
         s += '\n--polygon {:2}x (layer, N)   = '.format(len(self.polygons))
 
         L = []
@@ -1693,7 +1796,7 @@ class Cell():
         s += '\n--gds     {:2}x (file, cell) = '.format(len(self.gdsfiles))
 
         L = []
-        for g in self.gdsfiles:
+        for pointer, g in self.gdsfiles:
             L.append('({g[1]}, {g[2]})'.format(g=g))
         s += ', '.join(L)
 
@@ -1705,11 +1808,11 @@ class Cell():
         return s + '\n'
 
 
-    def _poly_iter(self):
+    def _polyshape_iter(self):
         """Generator to iterate over all polylines and polygons.
 
         Yields:
-            tuple: (org, points)
+            (Pointer, list): (org, points)
         """
         for org, polygon in self.polygons:
             yield org, polygon.points
@@ -1729,6 +1832,12 @@ class Cell():
         if not cfg.solve_direct:
             Netlist().solvecell(self)
 
+        if self.userbbox is not None:
+            ubox = np.array(self.userbbox).transpose()
+            self.bbox = (min(ubox[0]), min(ubox[1]), max(ubox[0]), max(ubox[1]))
+            self.autobbox = True
+            return None
+
         if bbox:
             limit = 1e8
             self.bbox = (limit, limit, -limit, -limit)
@@ -1738,37 +1847,45 @@ class Cell():
                 s = -1
 
             elements = 0
-            for org, points in self._poly_iter():
+            for org, points in self._polyshape_iter():
                 elements += 1
                 if flip:
                     org = org.copy()
                     org.flip()
                 [x0, y0, a0] = org.xya()
                 a = s*np.radians(a0)
-                for u, v in points:
-                    x, y = x0+cos(a)*u-sin(a)*v, y0+s*(sin(a)*u+cos(a)*v)
-                    self.bbox = (
-                         min(self.bbox[0], x), min(self.bbox[1], y),
-                         max(self.bbox[2], x), max(self.bbox[3], y))
+                #do not us bbox of the polyshape as that is a (rotated) rectangle
+                xy = np.array(points).transpose()
+                x = xy[0]*cos(a) - xy[1]*sin(a)
+                y = xy[0]*sin(a) + xy[1]*cos(a)
+                xybox = (x0+x.min(), y0+y.min(), x0+x.max(), y0+y.max())
+                self.bbox = (
+                    min(self.bbox[0], xybox[0]), min(self.bbox[1], xybox[1]),
+                    max(self.bbox[2], xybox[2]), max(self.bbox[3], xybox[3]))
 
-            for cnode in self.cnode.cnode_nb_iter():
+            for cnode in self.cnode.instance_iter():
                 elements += 1
                 org = cnode.pointer.copy()
                 if cnode.flip:
-                    org.flip()
-                [x0, y0, a0] = org.xya()
+                    s = -1
+                else:
+                    s = 1
+                x0, y0, a0 = org.xya()
                 a = s*np.radians(a0)
                 if cnode.cell.bbox is None:
                     self.bbox_complete = False
                     continue
                 x1, y1, x2, y2 = cnode.cell.bbox
-                xbl, xbr, xtl, xtr = cos(a)*x1-sin(a)*y1, cos(a)*x2-sin(a)*y2, cos(a)*x2-sin(a)*y1, cos(a)*x1-sin(a)*y2
-                ybl, ybr, ytl, ytr = sin(a)*x1+cos(a)*y1, sin(a)*x2+cos(a)*y2, sin(a)*x2+cos(a)*y1, sin(a)*x1+cos(a)*y2
+                xbl, xbr, xtl, xtr = cos(a)*x1-sin(a)*y1, cos(a)*x2-sin(a)*y2,\
+                                     cos(a)*x2-sin(a)*y1, cos(a)*x1-sin(a)*y2
+                ybl, ybr, ytl, ytr = sin(a)*x1+cos(a)*y1, sin(a)*x2+cos(a)*y2,\
+                                     sin(a)*x2+cos(a)*y1, sin(a)*x1+cos(a)*y2
 
                 xmin = min(xbl, xbr, xtl, xtr)
-                ymin = min(ybl, ybr, ytl, ytr)
+                ymin = min(s*ybl, s*ybr, s*ytl, s*ytr)
                 xmax = max(xbl, xbr, xtl, xtr)
-                ymax = max(ybl, ybr, ytl, ytr)
+                ymax = max(s*ybl, s*ybr, s*ytl, s*ytr)
+
                 if cnode.array is not None:
                     Nx, (x1, y1), Ny, (x2, y2) = cnode.array
                     Xmin = min(0, (Nx-1)*x1/Nx, (Ny-1)*x2/Ny, (Nx-1)*x1/Nx+(Ny-1)*x2/Ny)
@@ -1847,6 +1964,21 @@ class Cell():
                 put_boundingbox('org', length=length, width=width,
                     move=(self.bbox[0], self.bbox[1]+0.5*width, 0))
         self._solve(bbox=False)
+        if self.store_pins:
+            pintxt = 'pins:\n'
+            for name, node in sorted(self.pin.items()):
+                if node.xs is None:
+                    xs = 'None'
+                else:
+                    xs = None
+                if node.width is None:
+                    w = 'None'
+                else:
+                    w = "{:.3f}".format(node.width)
+                pintxt += '{0}: {c[0]:.5f}, {c[1]:.5f}, {c[2]:.5f}, {xs}, {w}\n'.\
+                    format(name, xs=xs, w=w, c=node.xya())
+            Annotation(text=pintxt, layer=cfg.default_layers['pin_text']).put(0)
+
         self.closed = True
 
         cfg.cp = self.oldcp
@@ -1854,6 +1986,7 @@ class Cell():
         if cfg.cells:
             cfg.self = cfg.cells[-1]
         return self
+
 
 
 def diff(node1, node2):
@@ -1864,7 +1997,7 @@ def diff(node1, node2):
         node2 (Node): end node
 
     Returns:
-        (dx, dy, da): difference vector <node2> - <node2> between their pointers
+        (dx, dy, da): difference vector <node2> - <node1> between their pointers
     """
     if not cfg.solve_direct:
         cfg.cells[-1]._solve()
@@ -1878,6 +2011,21 @@ def diff(node1, node2):
     if da == 360:
         da = 0
     return dx, dy, da
+
+
+def midpoint(node1, node2):
+    """Calculate the geometrical center between two nodes.
+
+    Args:
+        node1 (Node): start node
+        node2 (Node): end node
+
+    Returns:
+        (x, y, a): mid-point between pointers of <node1> and <node2>.
+    """
+    x1, y1, a1 = node1.xya()
+    x2, y2, a2 = node2.xya()
+    return x1+(x2-x1)/2, y1+(y2-y1)/2, a1+(a2-a1)/2
 
 
 def bbinfo(item=None, data=None):
@@ -1931,10 +2079,13 @@ class Pin():
         if self.width is None:
             self.width = width
 
+
     def __repr__(self):
-        return "<Pin() object, name='{}', xs='{}', width={}, type={}, chain={}, show={}, remark={}>".\
+        return "<Pin() object, name='{}', xs='{}', width={}, type={}, "\
+            "chain={}, show={}, remark={}>".\
             format(self.name, self.xs, self.width, self.type, self.chain,
                 self.show, self.remark)
+
 
     def put(self, *args):
         """Put a Pin object in the layout."""
@@ -1994,7 +2145,7 @@ class Polyline():
         """
         self.layer = get_layer(layer)
         if width is not None:
-            self.width = width
+            self.width = float(width)
         else:
             self.width = 0.20
         self.pathtype = pathtype
@@ -2007,7 +2158,8 @@ class Polyline():
             size = len(self.points)
         except:
             size = 0
-        return "<Polyline() object, layer={}, width={}, pathtype={}, points={}, bbox={}>".\
+        return "<Polyline() object, layer={}, width={}, pathtype={}, "\
+            "points={}, bbox={}>".\
             format(self.layer, self.width, self.pathtype, size, self.bbox)
 
     def put(self, *args):
@@ -2059,8 +2211,42 @@ def _scan_branch(strm, cellname, celllist=None, level=0):
     yield(cellname)
 
 
-def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0):
-    """Get a list of all filenames.
+def _string_to_pins(string):
+    """Convert a pin annotation string to a pin dictionary.
+
+    Expected format of <string>:
+
+    "pins:
+    <name>: <x, y, a xs, w>
+    <name>: <x, y, a xs, w>
+    ..."
+
+    Header 'pins:' is case incensitive and spaces will be stripped.
+
+    Returns:
+        ordered dict: {<parameter_name>: <parameter_value>}
+    """
+    pins = None
+    lines = string.split('\n')
+    pins = OrderedDict()
+    if (lines[0].lower() == 'pins:'):
+        for line in lines[1:]:
+            if line == '':
+                continue
+            name, prop = line.split(':', 1)
+            x, y, a, xs, w = prop.replace(' ', '').split(',')
+            x = float(x)
+            y = float(y)
+            a = float(a)
+            if w.lower() != 'none':
+                w = float(w)
+            pins[name.strip()] = (x, y, a, xs, w)
+    return pins
+
+
+def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0,
+        scale=1.0):
+    """Translate a GDS stream into native native Nazca cell structure.
 
     If no cellname is provided it will select the topcell if there is only
     one topcell.
@@ -2074,6 +2260,7 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0):
     Returns:
         list of str: list of cellnames in <filename> under cell name <cellname>
     """
+    um = 1000/scale # scale factor between gds integers and micro-meters.
     NC = {}
     elements_unknown = set()
     cells_visited = set()
@@ -2088,34 +2275,55 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0):
            for elem in cellrecord.elements:
                 if elem.etype == gb.GDS_record.BOUNDARY:
                     LD, XY = elem.polygon
-                    XY = [(x/1000, y/1000) for x, y, in zip(*[iter(XY)]*2)]
+                    XY = [(x/um, y/um) for x, y, in zip(*[iter(XY)]*2)]
                     Polygon(points=XY, layer=LD).put(0)
+
                 elif elem.etype == gb.GDS_record.PATH:
-                    LD, XY = elem.polyline
-                    XY = [(x/1000, y/1000) for x, y, in zip(*[iter(XY)]*2)]
-                    Polyline(points=XY, layer=LD).put(0)
+                    LD, XY, pathtype, width = elem.polyline
+                    if width is not None:
+                        width = width/um
+                    XY = [(x/um, y/um) for x, y, in zip(*[iter(XY)]*2)]
+                    Polyline(points=XY, layer=LD, pathtype=pathtype,
+                        width=width).put(0)
+
                 elif elem.etype == gb.GDS_record.TEXT:
                     LD, XY, TEXT = elem.annotation
-                    XY = (XY[0]/1000, XY[1]/1000)
+                    XY = (XY[0]/um, XY[1]/um)
                     Annotation(layer=LD, text=TEXT).put(XY)
+                    if TEXT[:4].lower() == 'pins':
+                        pins = _string_to_pins(TEXT)
+                        for name, (x, y, a, xs, w) in pins.items():
+                            if name == 'org':
+                                continue
+                            if isinstance(xs, str):
+                                if xs.lower() == 'none':
+                                    xs = None
+                            if isinstance(w, str):
+                                if w.lower() == 'none':
+                                    w = None
+                            Pin(name=name, xs=xs, width=w).put(x, y, a)
+                            print(name, x, y, a, xs, w)
+
                 elif elem.etype == gb.GDS_record.BOX:
                     elements_unknown.add('BOX')
+
                 elif elem.etype == gb.GDS_record.SREF:
                     name, trans, mag, angle, XY = elem.instance
                     if trans == 1:
                         flip = True
                     else:
                         flip = False
-                    NC[name].put(XY[0]/1000, XY[1]/1000, angle, flip=flip, scale=mag)
+                    NC[name].put(XY[0]/um, XY[1]/um, angle, flip=flip, scale=mag)
+
                 elif elem.etype == gb.GDS_record.AREF:
                     name, trans, mag, angle, col, row, XY = elem.array
                     if trans == 1:
                         flip = True
                     else:
                         flip = False
-                    x, y = XY[0]/1000, XY[1]/1000
-                    x1, y1 = XY[2]/1000, XY[3]/1000
-                    x2, y2 = XY[4]/1000, XY[5]/1000
+                    x, y = XY[0]/um, XY[1]/um
+                    x1, y1 = XY[2]/um, XY[3]/um
+                    x2, y2 = XY[4]/um, XY[5]/um
                     dx1, dy1 = (x1-x)/col, (y1-y)/col
                     dx2, dy2 = (x2-x)/row, (y2-y)/row
                     NC[name].put(x, y, angle,
@@ -2148,7 +2356,7 @@ def gds_filter(filename, cellmap=None, layermap=None):
 def print_structure(filename, cellname, level=0):
     """Print gds structure in ascii art.
 
-    Rerturns:
+    Returns:
         None
     """
     strm = gdsimp.GDSII_stream(filename)
@@ -2182,14 +2390,20 @@ def load_gds(filename, cellname=None, newcellname=None, layermap=None,
         filename (str): filename of gds to load
         cellname (str): cellname in filename to load
         newcellname (str): new name for <cellname>
-        layermap (dict): mapping {old_layernumber: new_layernumber}
-        cellmap (dict): mapping {old_cellname: new_cellname}
-        scale (float): scaling factor if the cell (not yet implemented)
+        layermap (dict): layer mapping {old_layernumber: new_layernumber}
+        cellmap (dict): ceelname mapping {old_cellname: new_cellname}
+        scale (float): scaling factor of the cell (default=1.0).
+            Warning, use scaling with care and basically only on structures
+            like logos. Avoid (do not) use on library building blocks and/or
+            optical components as functionality may be compromised.
         prefix (str): optional string to avoid name clashes (default = '')
         instantiate (bool): instantiate the GDS (default = False)
-        native (bool): create native Nazca cells from GDS (default = True)
+        native (bool): create native Nazca cells from GDS (default = True).
+            Native cells provide full access to all elements in the gds.
         bbox (bool): add bounding box if True (default = False)
-        connect (float, float, float): move origin (x, y, a) when placing (when not Native)
+        bboxbuf (float): add a buffer to the bounding box (default = 0)
+        connect (float, float, float): Only for native=False,
+            move GDS origin by (x, y, a) when putting it into the layout.
 
     Returns:
         Cell: Nazca Cell containing the loaded gds cell(tree)
@@ -2263,11 +2477,11 @@ Cell name '{3}' in file '{1}' {4}is already in use in the design.
 
     #create cell:
     if native:
-        if scale != 1:
-            print("Warning: Scaling not applied for load_gds with native=True;"\
-                " scale={} will be ignored in cell '{}'.".format(scale, topcellname))
+        #if scale != 1:
+        #    print("Warning: Scaling not applied for load_gds with native=True;"\
+        #        " scale={} will be ignored in cell '{}'.".format(scale, topcellname))
         maskcell = _gds2native(strm=strm, topcellname=cellmap[topcellname],
-            cellmap=cellmap, bbox=bbox, bboxbuf=bboxbuf)
+            cellmap=cellmap, bbox=bbox, bboxbuf=bboxbuf, scale=scale)
     else:
         with Cell('load_gds', celltype='mask', instantiate=instantiate) as maskcell:
             maskcell._put_gds(
@@ -2288,7 +2502,7 @@ Cell name '{3}' in file '{1}' {4}is already in use in the design.
 def load_gds_raw(filename, cellname=None, newcellname=None, layermap=None,
         cellmap=None, scale=1.0, prefix='', instantiate=False,
         bbox=False, connect=None, **kwargs):
-    """Load GDS and always force native=False
+    """Load GDS and always force native=False.
 
     load_gds_raw(...) is the same as load_gds(..., native=False).
     See load_gds() for a detailed method description.
@@ -2296,16 +2510,16 @@ def load_gds_raw(filename, cellname=None, newcellname=None, layermap=None,
     Returns:
         Cell: Nazca Cell containing the loaded gds cell(tree)
     """
-    return load_gds_raw(filename=filename,
+    return load_gds(filename=filename,
         cellname=cellname, newcellname=newcellname,
         layermap=layermap, cellmap=cellmap,
         scale=scale, prefix=prefix,
         instantiate=instantiate,
-        native=False,
-        bbox=bbox, connect=connect)
+        native=False, bbox=bbox, connect=connect)
 
 
 def show_cp(r=10, w=1):
+    """Draw a ring in the layout to indicate/visualize the cp position."""
     Polygon(layer=1, points=ring(radius=r, width=w)).put()
 
 
@@ -2319,14 +2533,14 @@ class Netlist:
         self.cnodes_visited = set()
 
 
-    def solvecell_core(self, node, cnode0=None):
-        """Calculate the geometrical positions of nodes in a cell via the netlist.
+    def solvecell_core(self, node, _cnode0=None):
+        """Calculate the geometrical position of nodes in a cell via the netlist.
 
-        This includes all nodes in the cell and all node in instantiated cells
-        one level deep. Hence a node in scope adheres to one of the following
+        Include all nodes in the cell (level 0) and all nodes in instantiated
+        cells (level 1). Hence, a node in scope adheres to one of the following
         conditions:
 
-        - the node resides in same cell as the starting node (parent cnode0).
+        - the node resides in same cell as the starting node (parent <cnode0>).
         - the node resides in an instance of the cell of the starting node.
 
         A starting <node> has to be provided from where to solve.
@@ -2334,15 +2548,17 @@ class Netlist:
         position set at (x, y, a) = (0, 0, 0).
 
         Args:
-            node (Node): start node for solving the cell.
-            cnode0 (Node): cnode of the cell to solve (automatically obtained from node).
+            node (Node): node from where to start solving the cell
+            _cnode0 (Node): Internal parameter containing the cnode of the cell
+                to solve. It is automatically obtained from <node> in theh
+                first pass.
 
         Returns:
             None
         """
 
-        if cnode0 is None:
-            cnode0 = node.cnode
+        if _cnode0 is None:
+            _cnode0 = node.cnode
         self.nodes_visited.add(node)
 
         neighbours = node.geo_nb_iter()
@@ -2350,16 +2566,19 @@ class Netlist:
             if nextnode not in self.nodes_visited:
                 #print(node)
                 #node in main cell or in instance
-                if (nextnode.cnode is cnode0):
+                if (nextnode.cnode is _cnode0):
                     nextnode.pointer.set_mat(node.pointer.trans(mat))
-                    self.solvecell_core(nextnode, cnode0)
-                elif (nextnode.cnode.parent_cnode is cnode0):
+                    self.solvecell_core(nextnode, _cnode0)
+                elif (nextnode.cnode.parent_cnode is _cnode0):
                     nextnode.pointer.set_mat(node.pointer.trans(mat))
-                    self.solvecell_core(nextnode, cnode0)
+                    self.solvecell_core(nextnode, _cnode0)
                 else:
-                    print("...Warning: skipping node in cell '{}': it is not in scope of cell '{}'.".format(
-                        nextnode.cnode.cell.cell_name, cnode0.cell.cell_name))
-            #TODO: else: check geo consistency
+                    print("...Warning: skipping node {} in cell '{}': "\
+                        "The node is not in scope of cell '{}'.".format(
+                        nextnode,
+                        nextnode.cnode.cell.cell_name,
+                        _cnode0.cell.cell_name))
+            #TODO: else: check geo consistency, e.g. floating point delta's.
 
 
     def solvecell(self, cell):
@@ -2372,94 +2591,286 @@ class Netlist:
             None
         """
         if cfg.solve_direct:
-            #print("SOLVE-LIVE_skipping solvecell")
             return None
-        #print('SOLVING cell: {}'.format(cell.cell_name))
         cell.cnode.pointer.goto(0, 0, 0)
         self.solvecell_core(cell.cnode)
         return None
 
 
+# =============================================================================
+# Cell-element iterators that return Node and a cell-element object
+# =============================================================================
     def polygon_iter(self, cnode, infolevel=0):
-        """Iterater for all polygons in a cell (cnode).
+        """Generator to iterate over all polygons in a cell (cnode).
 
         Yields:
-            pointer, layer, points:
-                Next Polygon and info to generate it
+            (Pointer, Polygom): Next Polygon object and its position
         """
         for node, pgon in cnode.cell.polygons:
             if infolevel > 1:
                 print('{}polygon: ML={}, xya={}, bbox={}'.format('  '*infolevel,
-                    pgon.layer, node.pointer.get_xya(), pgon.bbox))
+                    pgon.layer, node.pointer.xya(), pgon.bbox))
             yield node.pointer.copy(), pgon
 
 
     def polyline_iter(self, cnode, infolevel=0):
-        """Iterator for all polylines (paths) in a cell (cnode).
+        """Generator to iterate over all polylines (paths) in a cell (cnode).
 
         Yields:
-            pointer, width, layer, path type points:
-                Next Polyline and info to generate it
-
+            (Pointer, Polyline): Next Polyline object and its position
         """
         for node, pline in cnode.cell.polylines:
             if infolevel > 1:
                 print('{}polyline: ML={}, xya={}, bbox={}'.format('  '*infolevel,
-                    pline.layer, node.pointer.get_xya(), pline.bbox))
+                    pline.layer, node.pointer.xya(), pline.bbox))
             yield node.pointer.copy(), pline
 
 
     def annotation_iter(self, cnode, infolevel=0):
-        """Iterator for all annotations in a cell (cnode).
+        """Generator to iterate over all annotations in a cell (cnode).
 
         Yields:
-            pointer, layer, text:
-                Next Annotation and info to generate it
+            (Pointer, annotation): Next Annotation and its position
         """
         for node, anno in cnode.cell.annotations:
             if infolevel > 1:
                 print('{}annotation: ML={}, xya={}'.format('  '*infolevel,
-                    anno.layer, node.pointer.get_xya()))
+                    anno.layer, node.pointer.xya()))
             yield node.pointer.copy(), anno
 
 
-    def gdsfile_iter(self, cnode, level=0, infolevel=0):
-        """Iterator for all GDS files instantiated in a cell (cnode).
+    def instance_iter(self, cnode):
+        """Generator to iterate over all instances in cell (cnode) one level deep.
 
         Yields:
-            pointer, file, cell, newcell, layermap, cellmap, scale:
-                Next gds file and info to generate it
+            Node: cnode of instance
+        """
+        for nn in cnode.nb_cnode:
+            if nn[2] == 1:
+                yield nn[0]
+
+
+    def gdsfile_iter(self, cnode, level=0, infolevel=0):
+        """Generator to iterate over all GDS files instantiated in a cell (cnode).
+
+        Yields:
+            (Pointer, gdsinfo): Next gds file and info to generate it.
+                gdsinfo = (filename, cell, newcell, layermap, cellmap, scale)
         """
         gdsfiles = cnode.cell.gdsfiles
-        for gdsinfo in gdsfiles:
-            pin, file, cell, newcell, layermap, cellmap, scale, strm = gdsinfo
-            out = pin.pointer.copy(), file, cell, newcell, layermap, cellmap,\
-                scale, strm
+        for node, gdsinfo in gdsfiles:
             if infolevel > 1:
                 print('{}gds-cell: cell={}, xya={}'.format('  '*infolevel,
-                    newcell, cnode.pointer.get_xya()))
-            yield out
+                    gdsinfo.newcell, cnode.pointer.xya()))
+            yield node.pointer.copy(), gdsinfo
 
 
-    def celltree_iter(self, cnode, level=0, position=None, flat=False, infolevel=0):
-        """Iterate over the cell hierarchy from the topcell at 'cnode', deep-first.
-
-        The tree decents from a 'cell cnode' into an 'instance cnode',
-        To subsequently decent into an instance we
-        - look up the cell object the instance is derived from,
-        - loop up the 'cell cnode' of that cell object,
-        - use that cnode to yield and seed the next cell level.
+# =============================================================================
+# Cell-element iterators WITH translation and flipping performed
+# =============================================================================
+    def polygon_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+        """Generator to iterate over all polygons in a cell (cnode).
 
         Args:
-            cnode (Node):
-            level (int):
-            position (Pointer):
-            flat (bool): flatten array instances if True (default = False)
-            infolevel (int):
+            cnode (Node): cnode to iterate
+            trans (tuple): translation state of instance
+            flip (bool): flip state of instance
+            apply (bool): default=True: Apply translation and flipping
+            infolevel (int): amount of debug info to display in stdout
 
         Yields:
-            cnode, level, position, flip:
-                Yields next cell, its level in the hierarchy and position.
+            (Polygon, (float, float, float)):
+                Next Polygon object and its position (x, y, a), 'a' in radians,
+                and a flip multiplyer -1 (flip) or 1
+        """
+        for node, pgon in cnode.cell.polygons:
+            if infolevel > 1:
+                print('{0}polygon: ML=({ld[0]:.0f}, {ld[1]:.0f}), '\
+                    'xya=({p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}), '\
+                    'bbox=({bx:.3f}, {by:.3f}), '\
+                    'N={1}'.format(
+                    '  '*infolevel, len(pgon.points), ld=pgon.layer,
+                    p=node.pointer.xya(),
+                    bx=pgon.bbox[2]-pgon.bbox[0],
+                    by=pgon.bbox[3]-pgon.bbox[1]))
+            org = node.pointer.copy()
+            s = 1
+            if flip:
+                s = -1
+                org = org.copy()
+                org.flip()
+            [x, y, a] = org.multiply_ptr(trans).xya()
+            a = s*np.radians(a)
+
+            if apply:
+                if [x, y, a] != [0, 0, 0]:
+                    xy = [(x+cos(a)*u-sin(a)*v, y+s*(sin(a)*u+cos(a)*v))
+                        for u, v in pgon.points]
+                else:
+                    xy = pgon.points
+                x1, y1, x2, y2 = pgon.bbox
+                bbox = ( x+cos(a)*x1-sin(a)*y1, y+s*(sin(a)*x1+cos(a)*y1),
+                         x+cos(a)*x2-sin(a)*y2, y+s*(sin(a)*x2+cos(a)*y2) )
+                yield pgon, xy, bbox
+            else:
+                yield pgon, [x, y, a], s
+
+
+    def polyline_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+        """Generator to iterate over all polylines in a cell (cnode).
+
+        Args:
+            cnode (Node): cnode to iterate
+            trans (tuple): translation state of instance
+            flip (bool): flip state of instance
+            apply (bool): default=True: Apply translation and flipping
+            infolevel (int): amount of debug info to display in stdout
+
+        Yields:
+            (Polyline, (float, float, float)):
+                Next Polyline object and its position (x, y, a), 'a' in radians,
+                and a flip multiplyer -1 (flip) or 1
+        """
+        for node, pline in cnode.cell.polylines:
+            if infolevel > 1:
+                print('{0}polyline: ML=({ld[0]:.0f}, {ld[1]:.0f}), '\
+                    'xya=({p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}), '\
+                    'bbox=({bx:.3f}, {by:.3f}), '\
+                    'N={1}'.format(
+                    '  '*infolevel, len(pline.points), ld=pline.layer,
+                    p=node.pointer.xya(),
+                    bx=pline.bbox[2]-pline.bbox[0],
+                    by=pline.bbox[3]-pline.bbox[1]))
+            org = node.pointer.copy()
+            s = 1
+            if flip:
+                s = -1
+                org = org.copy()
+                org.flip()
+            [x, y, a] = org.multiply_ptr(trans).xya()
+            a = s*np.radians(a)
+
+            if apply:
+                if [x, y, a] != [0, 0, 0]:
+                    xy = [(x+cos(a)*u-sin(a)*v, y+s*(sin(a)*u+cos(a)*v))
+                        for u, v in pline.points]
+                else:
+                    xy = pline.points
+                x1, y1, x2, y2 = pline.bbox
+                bbox = ( x+cos(a)*x1-sin(a)*y1, y+s*(sin(a)*x1+cos(a)*y1),
+                         x+cos(a)*x2-sin(a)*y2, y+s*(sin(a)*x2+cos(a)*y2) )
+                yield pline, xy, bbox
+            else:
+                yield pline, [x, y, a], s
+
+
+    def annotation_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+        """Generator to iterate over all annotations in a cell (cnode).
+
+        Args:
+            cnode (Node): cnode to iterate
+            trans (tuple): translation state of instance
+            flip (bool): flip state of instance
+            apply (bool): default=True: Apply translation and flipping
+            infolevel (int): amount of debug info to display in stdout
+
+        Includes translation and flipping.
+
+        Yields:
+            (Annotation, (float, float), int):
+                Next Annotation and its position as (x, y),
+                and a flip multiplyer -1 (flip) or 1
+        """
+        for node, anno in cnode.cell.annotations:
+            if infolevel > 1:
+                print('{0}annotation: ML=({ld[0]:.0f}, {ld[1]:.0f}), '\
+                    'xya=({p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}), '\
+                    "text='{t}'".format(
+                    '  '*infolevel,
+                    ld=anno.layer,
+                    p=node.pointer.xya(),
+                    t=anno.text[:5]))
+            org = node.pointer.copy()
+            if flip:
+                org = org.copy()
+                org.flip()
+            xy = org.multiply_ptr(trans).xy()
+            yield anno, xy
+
+
+    def instance_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+        """Generator to iterate over all instances one level deep.
+
+        Args:
+            cnode (Node): cnode to iterate
+            trans (tuple): translation state of instance
+            flip (bool): flip state of instance
+            apply (bool): default=True: Apply translation and flipping
+            infolevel (int): amount of debug info to display in stdout
+
+        Includes translation and flipping.
+
+        Yields:
+            Cell, (float, float, float): cell of instance,
+                and position (x, y, a), 'a' in degrees
+        """
+        for nn in cnode.nb_cnode:
+            if nn[2] == 1:
+                org = nn[0].pointer.copy()
+                if flip:
+                    org = org.copy()
+                    org.flip()
+                [x, y, a] = org.multiply_ptr(trans).xya()
+                yield nn[0], [x, y, a], flip
+
+
+    def gdsfile_iter2(self, cnode, trans, flip, apply, infolevel=0):
+        """Generator to iterate over all GDS files instantiated in a cell (cnode).
+
+        Args:
+            cnode (Node): cnode to iterate
+            trans (tuple): translation state of instance
+            flip (bool): flip state of instance
+            apply (bool): ignored: always True
+            infolevel (int): amount of debug info to display in stdout
+
+        Yields:
+             (Polyline, (float, float, float), bool):
+                Next gdsfile and its position (x, y, a), 'a' in degrees,
+                and the flip state
+        """
+        gdsfiles = cnode.cell.gdsfiles
+        for node, gdsinfo in gdsfiles:
+            if infolevel > 1:
+                print('{}gds-cell: cell={}, xya={}'.format('  '*infolevel,
+                    gdsinfo.newcell, cnode.pointer.xya()))
+            org = node.pointer.copy()
+            [x, y, a] = org.multiply_ptr(trans).xya()
+            yield gdsinfo, [x, y, a], flip
+
+
+# =============================================================================
+# Cell iteration
+# =============================================================================
+    def celltree_iter(self, cnode, level=0, position=None, flat=False,
+            infolevel=0):
+        """Generator to iterate over the cell under <cnode>, deep-first.
+
+        The tree decents from a cell cnode into an instance cnode.
+        For decending further into an instance:
+        - look up the cell object the instance represents,
+        - take that cell's cnode and use it to seed the next level.
+
+        Args:
+            cnode (Node): cnode of cell to iterate into
+            level (int): depth in cell tree, (default = 0)
+            position (Pointer): (default = None)
+            flat (bool): flatten array instances if True (default = False)
+            infolevel (int): amount of runtime info to stdout (default = 0)
+
+        Yields:
+            (Node, int, Pointer, bool): (cnode, level, position, flip).
+                Yields next cell, its level in the hierarchy and position
         """
         flip = cnode.flip
         cnodeC = cnode.cell.cnode #get cell cnode for cell or instance
@@ -2475,7 +2886,7 @@ class Netlist:
         except:
             array = None
         if (array is not None) and \
-                ((cnodeC.cell.instantiate is False) or (flat is True)):
+                (not cnodeC.cell.instantiate or flat):
             nx, (dx1, dy1), ny, (dx2, dy2) = array
             dx1 = dx1/nx
             dy1 = dy1/nx
@@ -2490,7 +2901,7 @@ class Netlist:
                         org2.move(xi*dx1+yi*dx2, xi*dy1+yi*dy2)
                         org2.set_a(a)
                     yield cnodeC, level, org2, flip
-                    cnode_iter = cnodeC.cnode_nb_iter()
+                    cnode_iter = cnodeC.instance_iter()
                     for nextcnode in cnode_iter:
                         if cnode.cell is not None:
                             elm1 = cnode.cell.name
@@ -2510,7 +2921,7 @@ class Netlist:
 
         else:
             yield cnodeC, level, position, flip
-            cnode_iter = cnodeC.cnode_nb_iter()
+            cnode_iter = cnodeC.instance_iter()
             for nextcnode in cnode_iter:
                 if cnode.cell is not None:
                     elm1 = cnode.cell.name
@@ -2529,6 +2940,138 @@ class Netlist:
                         infolevel)
 
 
+    def celltree_iter2(self, cell, level=0, position=None, flat=False,
+            cells_visited=None, infolevel=0):
+        """Generator to iterate over celltree with translation, flipping and flattening.
+
+        Iteration over this Generator with infolevel = 1 will print the Nazca
+        hierarchy, cell-levels to stdout.
+
+        Yields:
+            info to open or close cells in the netlist.
+        """
+        cnode = cell.cnode
+        tab = '=='
+        if cells_visited is None:
+            self.cells_visited = set()
+        else:
+            self.cells_visited = cells_visited
+
+        cell_iter = self.celltree_iter(cnode=cnode, level=level,
+            position=position, flat=flat, infolevel=0)
+
+        if level == 0:
+            if infolevel > 0:
+                print("Start Netlist (infolevel={})\n"
+                    "== -> open an instantiated cell\n"
+                    "<< -> close a cell\n"
+                    "** -> reused instantiated cell\n"
+                    ".. -> non-instantiated cell\n"
+                    "------------------------------".format(infolevel))
+            export_levels = [] # netlist levels corrresponding to export levels.
+            translist = []
+            fliplist = []
+            level_last = 0 # top level is 0
+            level_duplicate = 100 # level
+
+        for cnode, level, org, flip in cell_iter:
+            if level > level_duplicate: #skip cells that are copies of previous cells.
+                continue
+            else:
+                level_duplicate = 100
+
+            #close cells
+            depth, stop = level_last, max(1, level)
+            while depth >= stop:
+                if translist:
+                    translist.pop()
+                    fliplist.pop()
+                if depth in export_levels:
+                    export_levels.pop()
+                    if infolevel > 1:
+                        print('{}close'.format('<<'*depth))
+                    yield "close", (True, depth)
+                else:
+                    yield "close", (False, depth)
+                depth -= 1
+
+            cellname = cnode.cell.cell_name
+            if infolevel > 0:
+                info = ("'{}' @ ({:.3f}, {:.3f}, {:.3f}), flip={}, inst={}".\
+                    format(cellname, org.x, org.y, org.a,
+                        flip, cnode.cell.instantiate))
+
+            if not flat:
+                inst = cnode.cell.instantiate
+            else:
+                inst = False
+            visited = cellname in self.cells_visited
+
+            if not inst or not visited: #create new cell or recreate flat:
+                if infolevel > 0:
+                    text = 'create ' if infolevel > 2 else ''
+                    if inst:
+                        print('{}{}{}'.format('=='*level, text, info))
+                    elif infolevel > 1:
+                        print('{}{}{}'.format('.'*len(tab)*level, text, info))
+                self.cells_visited.add(cellname)
+
+                # Apply translation and flipping:
+                if inst or level == 0: #create new export level
+                    create = True
+                    export_levels.append(level)
+                    translist.append(Pointer(0, 0, 0))
+                    fliplist.append(False)
+                    fliplast = flip
+
+                else: #flattened cell -> content translates into a parent cell.
+                    create = False
+                    translate = translist[-1].copy()
+                    orgtrans = org.copy()
+                    if fliplist[-1]:
+                        orgtrans.flip()
+                    fliplast = fliplist[-1] ^ flip
+                    fliplist.append(fliplast)
+                    translate.move_ptr(orgtrans)
+                    translist.append(translate)
+
+                parent_level = export_levels[-1]
+                trans = translist[-1]
+                flip = fliplist[-1]
+
+                yield "new",\
+                    (cnode.cell, create, level, trans, flip, parent_level)
+                level_last = level
+
+            elif inst: #copy of earlier cell:
+                if infolevel > 0:
+                    text = 'reuse ' if infolevel > 1 else ''
+                    print('{}{}{}'.format('*'*len(tab)*level, text, info))
+                level_duplicate = level
+                level_last = level-1
+
+        #close cells
+        depth = level
+        while depth >= 0:
+            if infolevel > 2:
+                print("{}close".format(tab*depth, depth))
+            if translist:
+                translist.pop()
+                fliplist.pop()
+            if depth in export_levels:
+                export_levels.pop()
+                if infolevel > 1:
+                    print('{}close'.format(tab*depth))
+                yield "close", (True, depth)
+            else:
+                yield "close", (False, depth)
+            depth -= 1
+        if infolevel > 0:
+            print("End Netlist")
+
+
+#little bit ugly, but needed for now to make the Cell.rebuild method
+import nazca.layout as layout
 #-----------------------------------------------------------------------------
 if __name__ == '__main__':
     pass

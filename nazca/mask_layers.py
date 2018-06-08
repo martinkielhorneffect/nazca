@@ -50,8 +50,9 @@ from . import xsection
 from pprint import pprint
 
 # keep track of layers used by the designer that have not been defined:
-unkown_layers = set()
-unkown_xsections = set()
+unknown_layers = set()
+unknown_xsections = set()
+cfg.layerset = set()
 
 cfg.xsection_table = pd.DataFrame()
 xsection_table_attr = ['xsection', 'xsection_foundry', 'origin', 'stub']
@@ -98,7 +99,8 @@ def add_layer(
     width=None,
     marked=None,
     animation=None,
-    alpha=None):
+    alpha=None,
+    unknown=False):
 
     """Create a new mask layer.
 
@@ -111,8 +113,11 @@ def add_layer(
     """
 
     #if layer is None:
-    _layer, _datatype = get_layer(layer)
-        #layer = (cfg.default_xs['layer'][0], 0)
+    if unknown: #redirected from get_layer
+        _layer, _datatype = layer
+    else:
+        _layer, _datatype = get_layer(layer)
+    #layer = (cfg.default_xs['layer'][0], 0)
     #if datatype is None:
     #    datatype = 0
     if accuracy is None:
@@ -287,8 +292,8 @@ def load_layers(filename):
     cfg.layer_table.dropna(how='all', inplace=True)
     cfg.layer_table.index.name = 'id'
     #delete unknown_layers when overwriting cfg.layer_table
-    global unkown_layers
-    unkown_layers = set()
+    global unknown_layers
+    unknown_layers = set()
 
     #TODO: add filename to column to track origin of content:
     #cfg.layer_table['filename'] = filename
@@ -424,9 +429,9 @@ def load_masklayers(layer_file=None, xsection_layer_file=None):
     """Load layer and xsection files and merge them.
 
     This function combines
-    1. load_layers(),
-    2. load_xsection_layer_map() and
-    3. merge().
+    1. load_layers()
+    2. load_xsection_layer_map()
+    3. merge()
 
     Args:
         layer_file (str): layer file name of csv file
@@ -497,19 +502,20 @@ def get_layer(layer):
             layID = (int(l), int(d))
         except:
             pass
-    if layID is None: #layer not (yet) in unkown_layers:
+    if layID is None: #layer not (yet) in unknown_layers:
         text = ''
         if layer in cfg.default_layers:
             layID = cfg.default_layers[layer]
             text = 'internal Nazca '
-            return layID # avoid warnings
+            warning = False #return layID # avoid warnings
         else:
             if isinstance(cfg.default_dump_layer, int):
                 layID = (int(cfg.default_dump_layer), 0)
             elif isinstance(cfg.default_dump_layer, tuple):
                 if len(cfg.default_dump_layer) == 2:
                     layID = cfg.default_dump_layer
-        if layer not in unkown_layers:
+            warning = True
+        if warning and layer not in unknown_layers:
             if isinstance(layer, str):
                 print("Warning: {0}layer '{1}' not set. "\
                       "Setting it now and redirecting output to layer {2}. "\
@@ -524,9 +530,12 @@ def get_layer(layer):
                       "add_layer(name=<name>, layer={0})\n"\
                       "Available layers are:\n{2}".\
                      format(layer, layID, sorted(list(cfg.layerdict.keys()))))
-            unkown_layers.add(layer)
+            unknown_layers.add(layer)
             add_layer(name=str(layer), layer=cfg.default_dump_layer)
 
+    if layID not in cfg.layerset:
+        cfg.layerset.add(layID)
+        add_layer(name=str(layID), layer=layID, unknown=True)
     return layID
 
 
@@ -603,30 +612,6 @@ set_plt_properties()
 #==============================================================================
 # colors
 #==============================================================================
-def load_layercolors(filename):
-    """Read colormap from a .csv Nazca color table."""
-
-    #For klayout tabs with group the layer column contains a '*'
-    #Pandas will read the layer then as type = str
-    #For tabs without groups the layer is read as type=int
-    df1 = pd.read_csv(filename)
-    df1['layer'] = df1['layer'].astype(str)
-    cfg.colors = df1[df1['layer'] != '*'].dropna(subset=['layer'])
-    cfg.colors.reset_index(inplace=True)
-    try:
-        cfg.colors['layer'] = cfg.colors['layer'].astype(str)
-        cfg.colors['datatype'] = cfg.colors['datatype'].astype(str)
-    except:
-        pass
-        #print('Group in load_layercolors:', cfg.colors['layer'], '\n')
-    #TODO: the try will trigger on any layer entry with text.
-    # as a resuls all the layers and datatype remain a string.
-
-    #cfg.colors.set_index(['layer', 'datatype'], inplace=True)
-    cfg.colors['alpha'] = 0.3
-    return None
-
-
 color_defaults = {
     'frame_brightness': 0,
     'fill_brightness': 0,
@@ -641,8 +626,42 @@ color_defaults = {
     'animation': 1,
     'alpha' : 0.3
 }
-# note: fill_color and frame_color will come from default colormap.
 
+
+def load_layercolors(filename):
+    """Read colormap from a .csv Nazca color table file.
+
+    Returns:
+        None
+    """
+
+    #For Klayout tabs with groups the layer column contains a '*'
+    #and Pandas will create type->str
+    #For tabs without groups the layer is read as type->int
+    df1 = pd.read_csv(filename)
+    df1['layer'] = df1['layer'].astype(str)
+    #df1.loc[df1['width'] == 'na', 'width'] = 0
+    df1.replace('na', '', inplace=True)
+
+    #TODO: creates a brand new table and forgets present settings
+    #  needs an update to handle mutliple layer/color sets.
+    cfg.colors = df1[df1['layer'] != '*'].dropna(subset=['layer'])
+    cfg.colors.reset_index(inplace=True)
+    try:
+        cfg.colors['layer'] = cfg.colors['layer'].astype(str)
+        cfg.colors['datatype'] = cfg.colors['datatype'].astype(str)
+    except:
+        print('Warning: Check load_layercolors.')
+        #print('Group in load_layercolors:', cfg.colors['layer'], '\n')
+    #TODO: the try will trigger on any layer entry with text.
+    # as a resuls all the layers and datatype remain a string.
+
+    #cfg.colors.set_index(['layer', 'datatype'], inplace=True)
+    cfg.colors['alpha'] = 0.3
+    return None
+
+
+# note: fill_color and frame_color will come from default colormap.
 def set_layercolor(
     layer=None,
     frame_color=None,
@@ -659,7 +678,9 @@ def set_layercolor(
     alpha=None):
     """Set layer color information.
 
-    For missing values the default_colors will be applied.
+    For missing values for fill_color and frame_color, the default_colors
+    as specified in colormap cfg.plt_cmap will be applied. This colormap can
+    be adjusted by the user.
 
     Args:
         layer (int | tuple): layer number or (layer, datatype)
@@ -702,7 +723,7 @@ def set_layercolor(
     if items == 0:
         #TODO: not here or the colors can't be changed later on.
         #col = mpl.colors.to_hex(cfg.plt_cmap[layer % cfg.plt_cmap_size])
-        col = rgb2hex(cfg.plt_cmap[layer % cfg.plt_cmap_size])
+        col = rgb2hex(cfg.plt_cmap[int(layer % cfg.plt_cmap_size)])
 
         if fill_color is None:
             colors['fill_color'] = col

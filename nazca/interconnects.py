@@ -146,11 +146,11 @@ class Interconnect():
         self.xs = xs
         self.layer = layer
         self.instantiate = False
-        self.xya = (100,100,10)
+        self.xya = (100, 100, 10)
         self.line = nd.Tp_straight(xs=self.xs, layer=self.layer)
         self.ccurve = nd.Tp_ccurve(xs=self.xs, layer=self.layer)
-        self.pcurve = nd.Tp_pcurve(xya=self.xya, Rin=0,
-                Rout=0, xs=self.xs, layer=self.layer)
+        self.pcurve = nd.Tp_pcurve(xya=self.xya, Rin=0, Rout=0, xs=self.xs,
+            layer=self.layer)
         self.Farc = nd.Tp_arc(xs=self.xs, layer=self.layer)
         self.__ptaper = nd.Tp_ptaper(xs=self.xs, layer=self.layer)
         self.__taper = nd.Tp_taper(xs=self.xs, layer=self.layer)
@@ -159,7 +159,7 @@ class Interconnect():
         self.arrow = tdk.make_pincell()
 
 
-    def copy(self):
+    def copy(self, ic=None):
         """Create a copy of the Interconnect object.
 
         The copy is created by initializing a new Interconnect with __init__
@@ -168,14 +168,16 @@ class Interconnect():
         Return:
             Interconnect: copy of self
         """
+        if ic is None:
+            ic = self
         return Interconnect(
-            radius=self.radius,
-            width=self.width,
-            angle=self.angle,
-            xs=self.xs,
-            layer=self.layer,
-            adapt_width=self.adapt_width,
-            adapt_xs=self.adapt_xs)
+            radius=ic.radius,
+            width=ic.width,
+            angle=ic.angle,
+            xs=ic.xs,
+            layer=ic.layer,
+            adapt_width=ic.adapt_width,
+            adapt_xs=ic.adapt_xs)
 
 
     def arc(self, radius=10, width=1.0, angle=90, xs=None,
@@ -634,7 +636,10 @@ class Interconnect():
             pin (Node): optional Node for modeling info
             xs (str): xsection of sbend
             offset (float): lateral offset of the sbend in um
-            Ltot (float): optional total forward length of the sbend in um
+            Ltot (float): optional total forward length of the sbend in um.
+                When positive/negative, additional length is added at the
+                end/start of the s-bend, provided the forward length of the
+                s-bend itself is shorter than abs(Ltot).
 
         Returns:
             Cell: sbend element
@@ -666,7 +671,7 @@ class Interconnect():
             L = (abs(offset) - abs(2*radius*(1-m.cos(Amax))))
             A = sign(-offset)*Amax
 
-        Lx = (2*radius+L) * m.sin(abs(A))
+        Lx = 2*radius * m.sin(abs(A)) + L * m.cos(abs(A))
         dLx = abs(Ltot)-Lx
 
         if Ltot < 0 and dLx > 0:
@@ -1401,6 +1406,7 @@ class Interconnect():
         cfg.cp = pin1
         return ICcell
 
+
     def pcurve_p2p(self, pin1=None, pin2=None, width=None, Rin=0, Rout=0,
             Oin=None, Oout=None, xs=None, name=None, arrow=True):
         """Create point-to-point pcurve interconnect.
@@ -1410,6 +1416,12 @@ class Interconnect():
             pin2 (Node | Instance): end pin
             width (float): optional waveguide width in um
             xs (str): optional xsection
+            Rin (float):
+            Rout (float):
+            Oin (float):
+            Oout (float):
+            name (str):
+            arrow (bool):
 
         Returns:
             Cell: pcurve interconnect element
@@ -1443,16 +1455,16 @@ class Interconnect():
         xs = self._getxs(pin1, xs)
         width  = self._getwidth(pin1, width, xs)
 
-        with nd.Cell('pcurve_{}_{}_{}_{}'.format(xs,int(dx),int(dy),int(da)),
+        with nd.Cell('pcurve_{}_{}_{}_{}'.format(xs, int(dx), int(dy), int(da)),
                 instantiate=self.instantiate, cnt=True) as ICcell:
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
             if abs(dy) < 1e-6 and abs(da) < 1e-6 and \
                     abs(Rin) < 1e-6 and abs(Rout) < 1e-6:
                 # Straight line will do just fine.
-                self.strt(length=dx).put(0,0,0)
+                self.strt(length=dx).put(0)
             else:
                 self.pcurve(xya, width=width, Rin=Rin, Rout=Rout,
-                        Oin=Oin, Oout=Oout, xs=xs).put()
+                    Oin=Oin, Oout=Oout, xs=xs).put()
             nd.Pin('b0', width=width, xs=xs).put()
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])

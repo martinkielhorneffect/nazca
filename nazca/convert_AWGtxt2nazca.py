@@ -29,6 +29,8 @@ Author: Ronald Broeke 2017(c)
 """
 
 import os
+from .netlist import Pin
+from .pdk_template_core import put_stub
 
 
 def get_txt_files(dir):
@@ -45,7 +47,7 @@ def get_txt_files(dir):
     return txt
 
 
-def convert_file(file, xs, win, wout):
+def convert_file(file, xs, win, wout, warm=None):
     """Reformat the AWG coordinates from the OD BrightAWG .txt file into Nazca format.
 
     Output format: port, x, y, a, xs, w
@@ -78,22 +80,65 @@ def convert_file(file, xs, win, wout):
                     parts[3] = str(float(parts[3])+180)
                     line = ','.join(parts)
                     width = win
+                    width = win
                 if 'out' in line:
                     line = line.replace('out', 'b')
                     width = wout
+                if 'armi' in line:
+                    line = line.replace('armi', 'c')
+                    parts = line.split(',')
+                    parts[3] = str(float(parts[3])+180)
+                    line = ','.join(parts)
+                    width = warm
+                if 'armo' in line:
+                    line = line.replace('armo', 'd')
+                    width = warm
                 if 'fpri' in line or 'fpro' in line:
                     parts = line.split(',')
                     parts[3] = str(float(parts[3])+180)
                     line = ','.join(parts)
+                    width = None
                     xs = None
-                    width = 0.0
                 line = '{},{},{}'.format(line, xs, width)
                 output.append(line)
     return output
 
 
+def put_pins(file, xs, win, wout, warm=None, stubs=False):
+    """Load the OD BrightAWG .txt file and place the pins in the active cell.
+
+    This function skips the converstion to a file with Nazca coordinates.
+    Can be usefull as a shortcut.
+
+    To generate a new converted file use method 'convert' with the same
+    parameters, except put_pins only accepts one file at a time.
+
+    Args:
+        file (str: filename
+        xs (float): xsection of connection
+        win (float): waveguide width input side
+        wout (float): waveguide width output side
+
+    Returns:
+        None
+    """
+    pinlist = convert_file(file=file, xs=xs, win=win, wout=wout, warm=warm)
+    #print(pinlist)
+    for line in pinlist[1:]: # skip header
+        name, x, y, a, xs, w = line.split(',')
+        if name == 'org':
+            continue
+        if xs.lower() == 'none':
+            xs = None
+        if w.lower() == 'none':
+            w = None
+        Pin(name=name, width=w, xs=xs).put(x, y, a)
+        if stubs:
+            put_stub(name)
+
+
 def convert(files, xs, win, wout):
-    """Loop .txt input files and write converted nazca output files.
+    """Loop .txt input files and write converted onne or more nazca output files.
 
     Args:
         files (str | list of str): filename(s)

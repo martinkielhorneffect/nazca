@@ -54,7 +54,7 @@ __all__ = ["layout_open", "cell_open", "layout_close", "cell_close",
            "cell_reference"]
 
 
-def layout_open(name='Nazca {}'.format(__version__)):
+def layout_open(name=None):
     """Open a GDS stream.
 
     Args:
@@ -63,6 +63,8 @@ def layout_open(name='Nazca {}'.format(__version__)):
     Returns:
         bytestring: stream for opening a layout
     """
+    if name is None:
+        name = 'Nazca {}'.format(__version__)
     strm = gbase.gds_header() \
          + gbase.gds_bgnlib() \
          + gbase.gds_libname(name) \

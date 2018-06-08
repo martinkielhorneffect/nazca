@@ -22,18 +22,14 @@
 from math import hypot, sqrt
 from collections import OrderedDict
 from . import gds_base as gbase
-from .netlist import Cell
-from PIL import Image
-import os
 import numpy as np
 import hashlib
-from nazca.netlist import Polygon
 from math import radians, cos, sin
 
 
 __all__ = ['parameters_to_string', 'string_to_parameters',
         'get_cell_annotation', 'get_cell_polyline', 'get_cell_polygon',
-        'make_iter', 'md5', 'isnotebook', 'image']
+        'make_iter', 'md5', 'isnotebook']
 
 
 def parameters_to_string(param):
@@ -62,15 +58,20 @@ def string_to_parameters(string):
 
     The returned parameter values are represented as type str.
 
-    Format:
+    Expected format of <string>:
 
-    "Parameters:
+    "parameters:
     <parameter> = <value>
     <parameter> = <value>
     ..."
 
+    Header 'parameters:' is case incensitive and spaces will be stripped.
+
+    Args:
+        string (str): parameters
+
     Returns:
-        ordered dict: {<parameter_name>: <parameter_value>}
+        OrderedDict: {<parameter_name>: <parameter_value>}
     """
     lines = string.split('\n')
     p = OrderedDict()
@@ -79,6 +80,15 @@ def string_to_parameters(string):
             param = line.split('=', 1)
             if len(param) == 2:
                 p[param[0].strip()] = param[1].strip()
+            else:
+                print("Warning: string_to_parameter: "
+                    "Expected one keyword and one value, but found instead: {}\n"\
+                    "Provided string: {}".\
+                    format(param, string))
+    else:
+        print("Error: string_to_parameter: "
+            "Expected header 'parameters:'\n"
+            "Provided string: {}".format(string))
     return p
 
 
@@ -189,116 +199,6 @@ def isnotebook():
             return False  # Other type (?)
     except NameError:
         return False      # Probably standard Python interpreter
-
-
-def PIL2array(img):
-    return np.array(img.getdata(), np.bool).reshape(img.size[1], img.size[0])
-
-
-def image(name, layer=1, size=256, pixelsize=1, threshold=0.5,
-        cellname=None, invert=False, align='cc', box_layer=None, box_buf=0):
-    """Read an image file and return a nazca cell with the image.
-
-    Image format can be png, jpg, gif, bpm, eps and others, as supported by Pillow.
-    Note that the output resolution (size) does not exceed the image resolution.
-    Increase <pixelsize> in this case to obtain a larger logo in gds.
-
-    A rectangular box can be added around the logo by providing a <box_layer>.
-    This box can be enlarged beyond the original image size by setting <box_buf> > 0.
-
-    Args:
-        name (str): name of the image file
-        layer (int): layer number that the image will be written to (default 1)
-        size (int): maximum bounding box size in pixels (default 256)
-        pixelsize (float): pixel size in micron (default 1)
-        threshold (float): black/white threshold (default 0.5)
-        cellname (str): Nazca cell name (default image filename)
-        invert (bool): flag to invert black & white (default False)
-        align (str): two character string for image alignment (default 'cc')
-            allowed:
-            lt, ct, rt,
-            lc, cc, rc,
-            lb, cb, rb
-
-        box_layer (str | int | tuple): layer reference to generate a rectangular
-            box behind the text, e.g. for tiling exclusion areas (NOFILL)
-            (default = None)
-        box_buf (float): extra buffer for the box_layer in um
-
-    Returns:
-        Cell: cell with image
-
-    Examples:
-        Load a logo in a cell and put and/or export it to gds::
-
-            import nazca as nd
-
-            logo = nd.image('mylogo.png', align='lb') # left/bottom alignment
-            logo.put(0)
-            nd.export_gds()
-
-        or::
-
-            import nazca as nd
-
-            nd.export_gds(logo, filename='mylogo.gds')
-    """
-    if cellname is None:
-        cellname = os.path.basename(name)
-    p = pixelsize
-    threshold = int(threshold * 256)
-    a = {'lb', 'cb', 'rb', 'lc', 'cc', 'rc', 'lt', 'ct', 'rt'}
-    if align not in a:
-        print("Invalid alignment specification '{}' for image '{}'.".format(align, name))
-        print("Allowed values are {}.".format(a))
-        print("Using default value 'cc'")
-        align = 'cc'
-    halign = {'l': 0, 'c': -0.5, 'r': -1}
-    valign = {'b': 0, 'c': -0.5, 't': -1}
-
-    im = Image.open(name)
-    gray = im.convert('L')
-    # resize keep aspect, only if smaller
-    gray.thumbnail((size, size), Image.ANTIALIAS)
-    bw = gray.point(lambda x: 0 if x<threshold else 255, '1')
-    pix = PIL2array(bw)
-    width, height = bw.size
-    width_tot = width*p + 2*box_buf
-    height_tot = height*p + 2*box_buf
-    print('Generating {}x{} pixels image of {:.0f}x{:.0f} um2, edge is {} um.'.\
-         format(width, height, width*p, height*p, box_buf))
-    h0 = halign[align[0]] * width_tot
-    v0 = valign[align[1]] * height_tot
-
-    with Cell(cellname) as C:
-        for line in range(height):
-            x1 = x0 = lb = lw = 0
-            y0 = (height - line) * p
-            for pixel in pix[line]:
-                if pixel == invert:
-                    lb += 1
-                    if lw > 0:
-                        x0 += lw * p
-                        lw = 0
-                else:
-                    lw += 1
-                    if lb > 0:
-                        x1 = x0 + lb * p
-                        xy = [(x0, y0), (x1, y0), (x1, y0-p), (x0, y0-p)]
-                        Polygon(layer=layer, points=xy).\
-                            put(h0+box_buf, v0+box_buf, 0)
-                        x0 = x1
-                        lb = 0
-            if lb > 0:
-                x1 = x0 + lb * p
-                xy = [(x0, y0), (x1, y0), (x1, y0-p), (x0, y0-p)]
-                Polygon(layer=layer, points=xy).\
-                    put(h0+box_buf, v0+box_buf, 0)
-
-        if box_layer is not None:
-            Polygon(layer=box_layer, points=[(0, 0), (0, height_tot),
-                (width_tot, height_tot), (width_tot, 0)]).put(h0, v0, 0)
-    return C
 
 
 def klayout2nazca(string):
@@ -520,3 +420,4 @@ def transform_polygon(points, dx=0.0, dy=0.0, da=0.0, scale=1.0,
         xy.append( ( x + scale*(cos(a)*u - sin(a)*v),
                      y + scale*(sin(a)*u + cos(a)*v) ))
     return xy
+

@@ -103,12 +103,14 @@ xsShallow = nd.add_xsection('Shallow')
 xsShallow.os = os_shallow
 xsShallow.width = 3.0
 xsShallow.radius = 200.0
+xsShallow.minimum_radius = 200.0
 xsShallow.taper = 50.0
 
 xsDeep = nd.add_xsection('Deep')
 xsDeep.os = os_deep
 xsDeep.width = 1.5
 xsDeep.radius = 75.0
+xsDeep.minimum_radius = 75.0
 xsDeep.taper = 50.0
 
 xsMetalDC = nd.add_xsection('MetalDC')

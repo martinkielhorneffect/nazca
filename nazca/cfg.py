@@ -151,6 +151,8 @@ default_layers = {
     'bbox_name':         (1022, 0),
     'bbox_pin':          (1023, 0),
     'bbox_pin_text':     (1024, 0),
+
+    'pin_text':          (1004, 0)
     }
 
 cellname_max_height = 50
@@ -158,6 +160,7 @@ cellname_scaling = 0.5
 
 stub_default_annotation_layer = 'bb_pin_text'
 bbox_stubs = True # add stubs to the cell bounding box
+store_pins = False # store pins in cell annotation to read gds as BB with pin reconstruction.
 
 # =============================================================================
 # pin shapes
@@ -182,6 +185,7 @@ def reset_pin_settings():
         'bb_pin_annotation_layer': default_layers['bb_pin_text'],
         'bb_pin_annotation_move': (-0.3, 0),
         'bbox_pin_size': 1.0,
+        'bbox_pin_layer': default_layers['bbox_pin'],
         'stub_length': 2.0
         }
 reset_pin_settings()
