@@ -254,14 +254,26 @@ def gds_colrow(col, row): # Record length = 4 + 4
          + pack_uint16(row) \
 
 
-def gds_xy(XY, close, min_length=1):
+def gds_xy(XY, close, min_length=1, unique=True):
+    """Create xy record.
+
+    Args:
+        XY (list (float, float)): list of points (x, y)
+        close:
+        min_length (int): default=1
+        unique (bool): remove consecutive duplicates (default = True).
+             Keep False for e.g. AREF definitions.
+    """
     # Convert to database units.
     XY = [(round_to_db_unit(a), round_to_db_unit(b)) for a, b in XY]
     # Add start to the end if close required.
     if close:
         XY.append(XY[0])
     # Remove consecutive duplicates.
-    xy = [coor[0] for coor in groupby(XY)]
+    if unique:
+        xy = [coor[0] for coor in groupby(XY)]
+    else:
+        xy = XY
     n = len(xy)
     if n < min_length:
         return None

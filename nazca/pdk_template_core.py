@@ -752,7 +752,7 @@ def bb_fingerprint(cellcalls, save=False, filename='fingerprint.json', infolevel
                 pinsetting[name] = {
                     'width': pin.width,
                     'xsection': pin.xs,
-                    'pointer': pin.xya(),
+                    'pointer': [float('{:.5f}'.format(xya)) for xya in pin.xya()],
                     'show': pin.show,
                     'type': pin.type,
                     'remark': pin.remark
@@ -939,14 +939,13 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
     # options to align the bbox in this cell w.r.t. to its pins:
     align_options = [ 'lb', 'lc', 'lt', 'rb', 'rc', 'rt', 'cc']
 
-    align_translate = [
-        (0, 0.5*width), (0, 0), (0, -0.5*width),
-        (-length, 0.5*width), (-length, 0), (-length, -0.5*width),
-        (-0.5*length, 0)
-    ]
+    align_options_xy = [
+        (0, 0.5*width), (0, 0), (0, -0.5*width), #lb, lc, lt
+        (-length, 0.5*width), (-length, 0), (-length, -0.5*width), #rb, rc, rt
+        (-0.5*length, 0)] #cc
 
-    dx = align_translate[align_options.index(align)][0]
-    dy = align_translate[align_options.index(align)][1]
+    dx = align_options_xy[align_options.index(align)][0]
+    dy = align_options_xy[align_options.index(align)][1]
 
     box = bbox.put(cfg.cells[-1].pin[pinname].move(dx, dy).move(*move))
     cell.length = length
@@ -958,9 +957,10 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
     return None
 
 
+#TODO: add flop
 def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
         layermap=None, flip=False, scale=1.0, stubs=True, native=True,
-        bbox=False, prefix=''):
+        bbox=False, bboxbuf=0, prefix='', instantiate=None):
     """Load a gds cell and the corresponding pin info from file.
 
     This function uses method 'load_gds' for loading the gds file
@@ -985,6 +985,9 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
             pin positions will be scaled along with the gds, however,
             xs information, like 'width' will *not* be scaled
         stubs (bool): place stubs (default = True)
+        native (bool):
+        bbox (bool):
+        bboxbuf (float):
 
     Returns:
         Cell: Nazca Cell with the loaded gds and (if provided) pins and stubs.
@@ -995,10 +998,11 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
     else:
         instantiate = False
         bboxgds = bbox
+    #TODO: add instantiate override
 
     with nd.Cell(cellname+'_stubs', instantiate=instantiate) as C:
-        #TODO: if this is true the instance and gds file may get the same name
-        #      causing a topology error in Klayout
+        #TODO: if instantiate is true the instance and gds file may get the same name
+        #      causing a topology error in GDS.
         nd.load_gds(
             filename=gdsfilename,
             cellname=cellname,
@@ -1007,13 +1011,13 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
             scale=scale,
             native=native,
             bbox=bboxgds,
+            bboxbuf=bboxbuf,
             prefix=prefix).\
                 put(0, flip=flip)
-        #TODO: if the GDS gets flipped as original the pins need to follow
         if flip:
-            s = -1
+            s = -1.0
         else:
-            s = 1
+            s = 1.0
         if pinfilename is not None:
             df = pd.read_csv(pinfilename, delimiter= ',', skiprows=1, header=None,
                 names = ['io', 'x', 'y', 'a', 'xs', 'w'])
@@ -1030,10 +1034,11 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
                     w = 0.0
 
                 nd.Pin(name=io, xs=xs, width=w).put(scale*x, s*scale*y, a)
-                if stubs and xs is not None :
+                if stubs: #and xs is not None :
                     put_stub(io)
         if instantiate and bbox:
             C.autobbox = True
+            C.bboxbuf = bboxbuf
     return C
 
 

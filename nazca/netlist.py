@@ -370,7 +370,7 @@ class Node():
         self.cell = None # TODO: in use? Cell object of the cnode
         self.pointer = None # Pointer of the Node. Contains the node position after solving.
         self.xs = None # String name reference to the xs of the node.
-        self.width = 0 # width of the node
+        self.width = None # width of the node
         self.instance = False # store if node is in a cell (False) or instance (True)
         self.type = None
         self.show = False # show pin in layout.
@@ -956,11 +956,12 @@ class Instance():
                 nd.bend(angle=-90).put(instance2.pin['a0'])
                 nd.export_plt()
         """
-
+        do_not_raise = ['org']
         if namesin is None:
             for name, node in self.pin.items():
-                Pin(name, width=node.width, xs=node.xs, type=node.type,
-                    chain=node.chain, show=show, remark=node.remark).put(node)
+                if name not in do_not_raise:
+                    Pin(name, width=node.width, xs=node.xs, type=node.type,
+                        chain=node.chain, show=show, remark=node.remark).put(node)
         else:
             if namesout is None:
                 namesout = namesin
@@ -1091,6 +1092,7 @@ class Cell():
         self.foundry_spt = None # list of BB parameters for use in spt export only.
         self.bbox = None
         self.autobbox = autobbox
+        self.bboxbuf= 0
 
         #pin handling:
         self.oldcp = cfg.cp
@@ -1510,7 +1512,6 @@ class Cell():
         instance.org = node
 
         connect_cnode(parent_cnode, instance.cnode, None)
-
         # all other nodes:
         for key, pin in self.pin.items():
             if True: #the name 'org' maybe outside the cnode. #key is not 'org':
@@ -1525,13 +1526,11 @@ class Cell():
                 instance.pin[key] = node
                 # reconstruct connectivity
                 # 1. org-to-node connectivity
-                x, y, a = pin.pointer.get_xya()
+                x, y, a = pin.pointer.xya()
                 if flipflop:
                     y, a = -y, -a
-                if flop:
-                    a += 180
                 connect_geo(instance.cnode, node, (x, y, a), solve=False)
-                # 2. copy pointer properties (stored position xya is irrelavant)
+                # 2. copy pointer properties (stored position xya is irrelevant)
                 node.pointer = pin.pointer.copy()
 
         instance.pinin = instance.pin[self.default_in]
@@ -1636,19 +1635,20 @@ class Cell():
         instance = self._copy_cell2instance(parent_cnode, flip, flop, array)
         nodeI, nodeC, T = self.parse_instance_connection(C1, C2, C3, C4, C5,
             instance=instance)
+        if flop:
+            T = (T[0], T[1], T[2]+180)
         connect_geo(nodeC, nodeI, T)
 
         if cfg.solve_direct:
     #        print("\nI: '{}'".format(instance.cnode.cell.cell_name))
     #        print("nodeI.pointer:", nodeI.pointer)
     #        print("cnodeI:", nodeI.nb_geo[0][0])
-    #        print("cnodeI:", nodeI.nb_geo[0][0])
             mat = nodeI.nb_geo[0][1]
             #postion cnodeI wrt parent cnode over the connected instance node nodeI:
             instance.cnode.pointer.set_mat(nodeI.pointer.trans(mat))
             for pp in instance.cnode.nb_geo:
                 pp[0].pointer.set_mat(instance.cnode.pointer.trans(pp[1]))
-    #            print(pp[0].name, pp[0].pointer)
+                #print(pp[0].name, pp[0].pointer)
 
             if False:
                 for name, P in instance.pin.items():
@@ -1723,8 +1723,7 @@ class Cell():
         Args:
             bbox (bool): Calculate the bounding box if True.
 
-
-        Retuurns:
+        Returns:
             None
         """
         if not cfg.solve_direct:
@@ -1785,11 +1784,16 @@ class Cell():
                     max(self.bbox[2], x0 + xmax + Xmax),
                     max(self.bbox[3], y0 + ymax + Ymax))
 
+            self.bbox = (
+                self.bbox[0] - self.bboxbuf,
+                self.bbox[1] - self.bboxbuf,
+                self.bbox[2] + self.bboxbuf,
+                self.bbox[3] + self.bboxbuf)
             if elements == 0:
                 self.bbox_complete = False
                 self.bbox = None
 
-            #print("-- bbox: {}: ({:.3f}, {:.3f}, {:.3f}, {:.3f})".\
+            #print("\n-- bbox: '{}': ({:.3f}, {:.3f}, {:.3f}, {:.3f})".\
             #     format(self.cell_name, *self.bbox ))
         return None
 
@@ -1840,7 +1844,7 @@ class Cell():
                         format(self.cell_name))
                 length = self.bbox[2] - self.bbox[0]
                 width = self.bbox[3] - self.bbox[1]
-                put_boundingbox('org', length, width,
+                put_boundingbox('org', length=length, width=width,
                     move=(self.bbox[0], self.bbox[1]+0.5*width, 0))
         self._solve(bbox=False)
         self.closed = True
@@ -2055,7 +2059,7 @@ def _scan_branch(strm, cellname, celllist=None, level=0):
     yield(cellname)
 
 
-def _gds2native(strm, topcellname=None, cellmap=None, bbox=False):
+def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0):
     """Get a list of all filenames.
 
     If no cellname is provided it will select the topcell if there is only
@@ -2080,6 +2084,7 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False):
         cells_visited.add(cellname)
         cellrecord = strm.cells[cellname]
         with Cell(cellname) as C:
+           C.default_pins('org', 'org')
            for elem in cellrecord.elements:
                 if elem.etype == gb.GDS_record.BOUNDARY:
                     LD, XY = elem.polygon
@@ -2091,7 +2096,7 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False):
                     Polyline(points=XY, layer=LD).put(0)
                 elif elem.etype == gb.GDS_record.TEXT:
                     LD, XY, TEXT = elem.annotation
-                    XY = [(x/1000, y/1000) for x, y, in zip(*[iter(XY)]*2)]
+                    XY = (XY[0]/1000, XY[1]/1000)
                     Annotation(layer=LD, text=TEXT).put(XY)
                 elif elem.etype == gb.GDS_record.BOX:
                     elements_unknown.add('BOX')
@@ -2120,11 +2125,13 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False):
                     elements_unknown.add(elem.etype)
            if (cellname == topcellname) and bbox:
                C.autobbox = True
+               C.bboxbuf = bboxbuf
         NC[cellname] = C
 
     if elements_unknown:
-        print("Warning: gds2nazca. Unknown elements in cell (branch) '{}': {}".\
-            format(cellname, elements_unknown))
+        elist= ["{}({})".format(gb.GDS_record.name[e], e) for e in elements_unknown]
+        print("Warning: gds2nazca: Ignoring elements in cell (branch) '{}': {}".\
+            format(cellname, ", ".join(elist)))
     return C
 
 
@@ -2150,8 +2157,8 @@ def print_structure(filename, cellname, level=0):
 
 def load_gds(filename, cellname=None, newcellname=None, layermap=None,
         cellmap=None, scale=1.0, prefix='', instantiate=False, native=True,
-        bbox=False, connect=None):
-    """Load a GDS cell <celllname> (and its instances) from <filename> into a Nazca cell.
+        bbox=False, bboxbuf=0, connect=None):
+    """Load GDS cell <celllname> (and its instances) from <filename> into a Nazca cell.
 
     This method checks for cellname clashes, i.e. a cell(tree)
     loaded into the layout can not contain a cell name that already exists
@@ -2169,7 +2176,7 @@ def load_gds(filename, cellname=None, newcellname=None, layermap=None,
 
     Note, if you need to create a building block from GDS with pins and stubs,
     and you have the pin and xsection info available already (for example in a file)
-    you may prefer to use method 'load_gdsBB' instead.
+    then you may prefer to use method 'load_gdsBB' instead.
 
     Args:
         filename (str): filename of gds to load
@@ -2180,7 +2187,8 @@ def load_gds(filename, cellname=None, newcellname=None, layermap=None,
         scale (float): scaling factor if the cell (not yet implemented)
         prefix (str): optional string to avoid name clashes (default = '')
         instantiate (bool): instantiate the GDS (default = False)
-        native (bool): create native Nazca cells from GDS
+        native (bool): create native Nazca cells from GDS (default = True)
+        bbox (bool): add bounding box if True (default = False)
         connect (float, float, float): move origin (x, y, a) when placing (when not Native)
 
     Returns:
@@ -2226,7 +2234,7 @@ def load_gds(filename, cellname=None, newcellname=None, layermap=None,
     for name in sorted(names):
         if name not in cellmap:
             cellmap[name] = '{}{}'.format(prefix, name)
-        if (cellmap[name] in cfg.cellnames.keys()) and not native: #native solves theh conflicts itself
+        if (cellmap[name] in cfg.cellnames.keys()) and not native: #native solves the conflicts itself
             if cellmap[name] is not name:
                 rename = "is renamed to '{0}' which ".format(cellmap[name])
             else:
@@ -2256,10 +2264,10 @@ Cell name '{3}' in file '{1}' {4}is already in use in the design.
     #create cell:
     if native:
         if scale != 1:
-            print("Warning: Scaling not applied for load_gds with native=True."\
-                " scale={} will be ignored in cell '{}'".format(scale, topcellname))
+            print("Warning: Scaling not applied for load_gds with native=True;"\
+                " scale={} will be ignored in cell '{}'.".format(scale, topcellname))
         maskcell = _gds2native(strm=strm, topcellname=cellmap[topcellname],
-            cellmap=cellmap, bbox=bbox)
+            cellmap=cellmap, bbox=bbox, bboxbuf=bboxbuf)
     else:
         with Cell('load_gds', celltype='mask', instantiate=instantiate) as maskcell:
             maskcell._put_gds(
@@ -2272,9 +2280,9 @@ Cell name '{3}' in file '{1}' {4}is already in use in the design.
                 scale=scale,
                 strm=strm)
             maskcell.autobbox = bbox
+            maskcell.bboxbuf = bboxbuf
 
     return maskcell
-
 
 
 def load_gds_raw(filename, cellname=None, newcellname=None, layermap=None,
@@ -2382,7 +2390,7 @@ class Netlist:
         for node, pgon in cnode.cell.polygons:
             if infolevel > 1:
                 print('{}polygon: ML={}, xya={}, bbox={}'.format('  '*infolevel,
-                    layer, node.pointer.get_xya(), bbox))
+                    pgon.layer, node.pointer.get_xya(), pgon.bbox))
             yield node.pointer.copy(), pgon
 
 
@@ -2397,7 +2405,7 @@ class Netlist:
         for node, pline in cnode.cell.polylines:
             if infolevel > 1:
                 print('{}polyline: ML={}, xya={}, bbox={}'.format('  '*infolevel,
-                    layer, node.pointer.get_xya(), bbox))
+                    pline.layer, node.pointer.get_xya(), pline.bbox))
             yield node.pointer.copy(), pline
 
 
@@ -2411,7 +2419,7 @@ class Netlist:
         for node, anno in cnode.cell.annotations:
             if infolevel > 1:
                 print('{}annotation: ML={}, xya={}'.format('  '*infolevel,
-                    layer, node.pointer.get_xya()))
+                    anno.layer, node.pointer.get_xya()))
             yield node.pointer.copy(), anno
 
 
@@ -2441,6 +2449,13 @@ class Netlist:
         - look up the cell object the instance is derived from,
         - loop up the 'cell cnode' of that cell object,
         - use that cnode to yield and seed the next cell level.
+
+        Args:
+            cnode (Node):
+            level (int):
+            position (Pointer):
+            flat (bool): flatten array instances if True (default = False)
+            infolevel (int):
 
         Yields:
             cnode, level, position, flip:

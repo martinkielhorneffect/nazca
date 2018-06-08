@@ -603,11 +603,11 @@ class Export_layout():
                     continue
 
             if self.gds:
-                [x0, y0, a0] = org.multiply_ptr(self.translist[-1]).get_xya()
                 if not cnode.cell.instantiate:
                      continue
+                [x0, y0, a0] = org.multiply_ptr(self.translist[-1]).get_xya()
                 content.append(gds.cell_reference([x0, y0], cellname, a0,
-                    flip=cnode.flip, array=cnode.array))
+                    flip=self.fliplist[-1] ^ cnode.flip, array=cnode.array))
                 if self.infolevel > 1:
                     print("{}  add instance '{}' @ ({:.3f}, {:.3f}, {:.3f})".format(
                         level*tab, cellname, x0, y0, a0))
@@ -691,6 +691,34 @@ class Export_layout():
             mplt.ioff()
             #print('Switched of Matplotlib interactive output.')
 
+        if self.bb:
+            #bbfile open and header
+            pyfilename = os.path.join(self.fln[:-4])+'.py'
+            bbfile = open(pyfilename, 'w')
+            bbfile_header =\
+"""# Nazca building block(s) file.
+#
+# Note1: Do *not* edit coordinates in the cell definition(s) below.
+# Note2: Always use this file with the intended, accompanying gds library.
+#
+# In order to use the BB(s) in this file,
+# include the following lines in your design file:
+#
+# import {0}
+# {0}.<bb_name>.put()
+#
+# where '{0}' is the name of this file without .py extension, and
+# where <bb_name> needs to be replaced with any cell variable name in this file.
+#
+# Executing this file stand-alone exports a gds with all BBs in this file.
+
+from nazca import Cell, Pin, load_gds, export_gds
+""".format(pyfilename[:-3], pyfilename)
+
+            bbfile.write(bbfile_header)
+            bbfile_footer = ""
+            bbfile_x = 0
+
         cells_visited = set()
         for topcell in topcells:
             if self.plt: #separate plot for each topcell.
@@ -758,6 +786,35 @@ class Export_layout():
                 print("export BB file: '{}'".format(file))
                 mplt.savefig(file)
 
+            if self.bb:
+                #bbfile body
+                gdsfilename = os.path.join(self.fln)
+                cellname = topcell.cell_paramsname
+                cellvar = cellname.replace('.', '_')
+                bbfile.write("\nwith Cell(name='BB', autobbox=False, instantiate=False) as {0}:\n".\
+                    format(cellvar))
+                bbfile.write("    load_gds(filename='{}', cellname='{}').put(0)\n".\
+                    format(gdsfilename, cellname))
+                bbfile_footer += ("    {}.put('org', {:.1f})\n".format(cellvar, bbfile_x))
+
+                if topcell.length is not None:
+                    bbfile_x += 1.1*topcell.length
+                for name, pin in sorted(topcell.pin.items()):
+                    if name == 'org':
+                        continue
+                    x, y, a = pin.pointer.xya()
+                    if pin.xs is None:
+                        xs = None
+                    else:
+                        xs = "'{}'".format(pin.xs)
+                    bbfile.write("    Pin(name='{}', width={}, xs={}).put({:.5f}, {:.5f}, {:.5f})\n".\
+                        format(name, pin.width, xs, x, y, a))
+
+        if self.bb:
+            #bbfile footer
+            bbfile.write("\nif __name__ == '__main__':\n")
+            bbfile.write(bbfile_footer)
+            bbfile.write("    export_gds()\n")
 
         # Save all external GDS file based instances:
         if self.gds:
@@ -770,6 +827,7 @@ class Export_layout():
                 self.gds_outfile.write(stream)
                 if self.infolevel > 0:
                     print("{}'{}'".format(tab*2, filename))
+
 
 
     def generate_layout(self,
@@ -786,7 +844,8 @@ class Export_layout():
         clear=False,
         title=None,
         output=None,
-        path=''):
+        path='',
+        bb=False):
         """Internal wrapper function before exporting the layout.
 
         Create final topcells list and set final flags for export.
@@ -822,6 +881,7 @@ class Export_layout():
         self.output = output
         self.path = path
         self.infolevel = infolevel
+        self.bb = bb
 
         if isinstance(topcells, str):
             print('WARNING: You are trying to export a string instead of a cell.')
@@ -945,7 +1005,8 @@ def export(topcells=None,
            clear=True,
            title=None,
            output=None,
-           path=''):
+           path='',
+           bb=False):
     """Export layout to gds file for all cells in <topcells>.
 
     Args:
@@ -998,7 +1059,7 @@ def export(topcells=None,
 
     export.generate_layout(topcells, filename, do_ascii, infolevel=infolevel,
         gds_=gds, flat=flat, spt=spt, plt=plt, svg=svg, clear=clear, title=title,
-        output=output, path=path)
+        output=output, path=path, bb=bb)
 
     if spt:
         Spt.close()
@@ -1046,7 +1107,8 @@ def export_spt(topcells=None, filename=None):
         plt=False, gds=False, spt=True, info=True)
 
 
-def export_gds(topcells=None, filename=None, flat=False, spt=False, clear=True, **kwargs):
+def export_gds(topcells=None, filename=None, flat=False, spt=False, clear=True,
+        bb=False, **kwargs):
     """Export layout to gds file for all cells in <topcells>.
 
     Args:
@@ -1060,5 +1122,5 @@ def export_gds(topcells=None, filename=None, flat=False, spt=False, clear=True, 
         None
     """
     verify_topcells(topcells)
-    export(topcells, filename=filename,
-        plt=False, gds=True, spt=spt, info=True, flat=flat, clear=clear, **kwargs)
+    export(topcells, filename=filename, plt=False, gds=True, spt=spt,
+        info=True, flat=flat, clear=clear, bb=bb, **kwargs)

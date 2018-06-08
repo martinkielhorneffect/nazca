@@ -330,6 +330,16 @@ class GDSII_element:
 
 
     @property
+    def stream(self):
+        """Create a stream of all records in the GDSII_element.
+
+        Returns:
+            bytearray: gds stream
+        """
+        return b''.join(rec.stream for rec in self.records)
+
+
+    @property
     def etype(self):
         """Return element type.
 
@@ -489,16 +499,6 @@ class GDSII_element:
             elif r.rtype == gb.GDS_record.XY:
                 XY = r.data
         return [sname, strans, mag, angle, col, row, XY]
-
-
-    @property
-    def stream(self):
-        """Create a stream of all records in the GDSII_element.
-
-        Returns:
-            bytearray: gds stream
-        """
-        return b''.join(rec.stream for rec in self.records)
 
 
 class GDSII_record:
@@ -737,7 +737,7 @@ class GDSII_stream:
         """Write a GDSII stream to file.
 
         Args:
-            filename (str): output filename for binairy gds
+            filename (str): output filename for binary gds
 
         Return:
             None
@@ -1046,10 +1046,16 @@ class GDSII_stream:
                     continue
                 if layID in self.layermap: # Replace with new layer number.
                     rec1 = GDSII_record(gb.gds_layer(self.layermap[layID][0]))
-                    rec2 = GDSII_record(gb.gds_datatype(self.layermap[layID][1]))
+                    dat1 = self.layermap[layID][1]
                 else:
                     rec1 = GDSII_record(gb.gds_layer(lay))
-                    rec2 = GDSII_record(gb.gds_datatype(dtype))
+                    dat1 = dtype
+                if rec.rtype == gb.GDS_record.DATATYPE:
+                    rec2 = GDSII_record(gb.gds_datatype(dat1))
+                elif rec.rtype == gb.GDS_record.TEXTTYPE:
+                    rec2 = GDSII_record(gb.gds_texttype(dat1))
+                elif rec.rtype == gb.GDS_record.BOXTYPE:
+                    rec2 = GDSII_record(gb.gds_boxtype(dat1))
                 elem.addrecord(rec1)
                 elem.addrecord(rec2)
                 lay = -1 #reset layer for next loop

@@ -198,21 +198,25 @@ class Interconnect():
             pin = pin.pin[pin.cnode.cell.default_out]
         return pin
 
-    def _getwidth(self, pin, width, xs, end=False):
+    def _getwidth(self, pin=None, width=None, xs=None, adapt=False):
         """Return width based on interconnect rules.
+
+        Args:
+            pin (Node): pin to connect
+            width (float): waveguide width
+            xs (str): xsection
+            end (bool): True if output output side of taper
 
         Returns:
             width
         """
         if width is not None:
             return width
-        if self.adapt_width and not end:
+        if adapt or self.adapt_width:
             if pin is None:
                 pin = cp.here()
             if pin.width is not None:
                 width = pin.width
-            #elif xs is not None and width is None:
-            #    width = None
         if width is None:
             try:
                 width = nd.get_section(xs).width
@@ -257,7 +261,7 @@ class Interconnect():
 
 
     def strt(self, length=None, width=None, pin=None, xs=None, edge1=None,
-             edge2=None, name=None, arrow=True):
+            edge2=None, name=None, arrow=True):
         """Create a straight waveguide.
 
         Args:
@@ -384,8 +388,8 @@ class Interconnect():
         """
         pin = self._getpinout(pin)
         xs = self._getxs(pin, xs)
-        width1 = self._getwidth(pin, width1, xs)
-        width2 = self._getwidth(pin, width2, xs, end=True)
+        width1 = self._getwidth(pin, width1, xs, adapt=True)
+        width2 = self._getwidth(pin, width2, xs, adapt=False)
 
         if length is None:
             length = self.length
@@ -434,8 +438,8 @@ class Interconnect():
         """
         pin = self._getpinout(pin)
         xs = self._getxs(pin, xs)
-        width1 = self._getwidth(pin, width1, xs)
-        width2 = self._getwidth(pin, width2, xs, end=True)
+        width1 = self._getwidth(pin, width1, xs, adapt=True)
+        width2 = self._getwidth(pin, width2, xs, adapt=False)
 
         if length is None:
             length = self.length
@@ -955,7 +959,7 @@ class Interconnect():
 
         radius1 -= 1e-8
         radius2 -= 1e-8
-        # Calculate circle centers. Note that pin1 is conceptually put at (0,0,0)
+        # Calculate circle centers. Note that pin1 is put at (0,0,0)
         c1Lx, c1Ly = 0, radius1
         c1Rx, c1Ry = 0, -radius1
         c2Lx, c2Ly = dx-radius2*m.sin(m.radians(da)), dy+radius2*m.cos(m.radians(da))
@@ -1435,9 +1439,6 @@ class Interconnect():
 
         dx, dy, da = nd.diff(pin1, pin2.rotate(180))
         xya = (dx, dy, da)
-
-        xs = self._getxs(pin1, xs)
-        width  = self._getwidth(pin1, width, xs)
 
         xs = self._getxs(pin1, xs)
         width  = self._getwidth(pin1, width, xs)

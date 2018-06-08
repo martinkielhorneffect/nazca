@@ -20,7 +20,7 @@ setup(
         install_requires = [
             'numpy', 'scipy', 'pandas', 'matplotlib', 'pillow', 'svgwrite'
             ],
-        version = '0.4-2-g1e5121b',
+        version = '0.4.1',
         description = 'Nazca Design',
         author = 'Ronald Broeke, Xaveer Leijtens',
         author_email = 'R.G.Broeke@gmail.com, X.Leijtens@gmail.com',

@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Nazca.  If not, see <http://www.gnu.org/licenses/>.
 #
-# 2017 (c)  Katarzyna Lawniczuk, Ronald Broeke
+# 2017 (c)  Katarzyna Lawniczuk, Ronald Broeke, Xaveer Leijtens
 #-----------------------------------------------------------------------
 """
 A set of funtions to create polygon geometries for shape like  box, taper, arc, frame.
@@ -531,6 +531,69 @@ def monkey(width=1000, height=1000):
     mk = np.multiply(mk - center, scale)
     return mk
 
+#
+# Parameterized MMI polygon waveguide outline
+#
+def MMI_iopoly(wmmi=10, o=None, wio=None, angle=53):
+    """MMI_iopoly: helper routine which generates one side of an MMI
+    outline polygon, from bottom to top. This side needs to be joined with
+    the other side."""
+    if o is None or len(o) == 0: # no waveguides
+        poly = [(0, -wmmi/2), (0, wmmi/2)]
+    else:
+        poly = []
+        nw = len(o) # number of waveguides
+        if not isinstance(wio, list):
+            wio = nw * [wio]
+        # Make sure the waveguides are ordered by offset (will become tuples).
+        o, wio = zip(*sorted(zip(o, wio)))
+        # Use two extra input waveguides, which are mirror images
+        # of the lower and upper waveguides.
+        o = (-wmmi-o[0],) + o + (wmmi-o[-1],)
+        wio = (wio[0],) + wio + (wio[-1],)
+        for n in range(nw+1):
+            # y-coordinate of top/bottom of waveguide n/n+1
+            y0 = o[n] + wio[n]/2
+            y1 = o[n+1] - wio[n+1]/2
+            d = (y1 - y0) / 2
+            if d > 0: # Non-overlapping waveguides
+                s = max(0, d / tan(radians(angle)))
+                if -wmmi/2 < y0 < wmmi/2:
+                    poly.append((0, y0))
+                poly.append((s, (y0+y1)/2))
+                if -wmmi/2 < y1 < wmmi/2:
+                    poly.append((0, y1))
+            else:
+                poly.append((0, (y0+y1)/2))
+    return poly
+
+
+def MMI_poly(wmmi=10, lmmi=100, wi=None, wo=None, oi=None, oo=None, angle=53):
+    """MMI layout polygon.
+
+    Returns an MMI polygon outline with angled corners for reduced
+    reflections. The input and output waveguides either have all the same
+    width (in which case wi and wo are a single float value) or they are
+    specified in a list or tuple of length equal to len(oi) and len(oo).
+
+    Parameters:
+        wmmi (float): width of the MMI
+        lmmi (float): length of the MMI
+        wi (float|list): input waveguide width(s)
+        wo (float|list): output waveguide width(s)
+        oi (list): input waveguide offsets from center
+        oo (list): output waveguide offsets from center
+        angle (float): corner cut angle (degrees) where 90° is a standard MMI
+
+    Returns:
+        poly (list): list of points of the MMI polygon.
+    """
+
+    pi = MMI_iopoly(wmmi=wmmi, o=oi, wio=wi, angle=angle)
+    po = MMI_iopoly(wmmi=wmmi, o=oo, wio=wo, angle=angle)
+    po = [(lmmi-x, y) for (x, y) in reversed(po)]
+
+    return list(pi)+po
 
 
 #def icon_mmi(Nin=2, Nout=2, w_in=2.0, w_gap=1.0, l_in=1.0, l_tot=10.0, l_buf=0.0):

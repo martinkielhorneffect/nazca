@@ -247,7 +247,7 @@ def default_font(f=default_font):
 def text(text="Text", height=50, layer=1, stretch=1, align='lb',
         linewidth=1, instantiate=False, box_layer=None, box_buf=None):
     return fdef.text(text=text, height=height, layer=layer, align=align,
-        box_layer=box_layer)
+        box_layer=box_layer, instantiate=instantiate)
 
 def linelength(text, height=50):
     return fdef.linelength(text, height)

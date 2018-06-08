@@ -161,6 +161,8 @@ def Tp_MMI2x2(length, width, pinwidth=None, offset=0,
     Returns:
         function that generates a Cell object
     """
+    if not isinstance(offset, list):
+        offset = [offset, -offset, offset, -offset]
     @pdk.hashme(name)
     def cell():
         """
@@ -172,10 +174,10 @@ def Tp_MMI2x2(length, width, pinwidth=None, offset=0,
         with nd.Cell(hashme=True) as C:
             C.groupname = groupname
             pdk.addBBmap(name, params=(OD_toStd))
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, +offset, 180)
-            nd.Pin(name='a1', xs=xs['a1'], width=pinwidth['a1'], remark='optical').put(0, -offset, 180)
-            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='optical').put(length, +offset)
-            nd.Pin(name='b1', xs=xs['b1'], width=pinwidth['b1'], remark='optical').put(length, -offset)
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, offset[0], 180)
+            nd.Pin(name='a1', xs=xs['a1'], width=pinwidth['a1'], remark='optical').put(0, offset[1], 180)
+            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='optical').put(length, offset[2])
+            nd.Pin(name='b1', xs=xs['b1'], width=pinwidth['b1'], remark='optical').put(length, offset[3])
 
             pdk.put_stub(['a0', 'a1', 'b0', 'b1'])
             pdk.put_boundingbox('org', length, width)

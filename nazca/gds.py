@@ -106,9 +106,11 @@ def cell_reference(xy, name, adeg=0, mag=1, flip=False, array=None): # angle in 
         bytestring: stream for a cell reference
     """
     if array is None:
+        unique = True
         strm = gbase.gds_sref() + gbase.gds_sname(name)
         xy = [xy]
     else:
+        unique = False
         strm = gbase.gds_aref() + gbase.gds_sname(name)
         col, row = array[0], array[2]
         xy = [xy] + \
@@ -121,13 +123,15 @@ def cell_reference(xy, name, adeg=0, mag=1, flip=False, array=None): # angle in 
     # So insert only if needed for flipping.
     if flip:
         strm += gbase.gds_strans(GDS_BIT_REFLECT)
-    if adeg != 0:
-        strm += gbase.gds_angle(adeg)
+    elif adeg != 0 and array is not None:
+        strm += gbase.gds_strans(0) #some mask tools expect strans if angle present.
     if mag != 1:
         strm += gbase.gds_mag(mag)
+    if adeg != 0:
+        strm += gbase.gds_angle(adeg)
     if array is not None:
         strm += gbase.gds_colrow(col, row)
-    strm += gbase.gds_xy(xy, False) + gbase.gds_endel()
+    strm += gbase.gds_xy(xy, close=False, unique=unique) + gbase.gds_endel()
     return strm
 
 def layout_close():

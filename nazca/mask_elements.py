@@ -60,6 +60,7 @@ def layeriter(xs=None, layer=None, dogrowy=False):
             _handle_missing_xs(xs)
 
     if layer is not None:
+        growx, growy = 0, 0 # a layer not as part of a xs has no grow
         layer = nd.get_layer(layer)
         lt = cfg.layer_table
         if lt.empty:
@@ -69,11 +70,13 @@ def layeriter(xs=None, layer=None, dogrowy=False):
             #      "     add_layer(layer={0})".format(layer))
             nd.add_layer(layer=layer)
             lt = cfg.layer_table
-        growx, growy = 0, 0 # a layer not as part of a xs has no grow
-        try:
+        lineitem = lt[(lt['layer'] == layer[0]) & (lt['datatype'] == layer[1])]
+        if lineitem.empty:
+            nd.add_layer(layer=layer)
+            lt = cfg.layer_table
             lineitem = lt[(lt['layer'] == layer[0]) & (lt['datatype'] == layer[1])]
-        except:
-            raise
+        #except:
+        #    raise
         try:
             accuracy = lineitem['accuracy']
             if accuracy.empty:
@@ -187,7 +190,9 @@ def Tp_straight(length=10, width=1.0, xs=None, layer=None, edge1=None,
 
         if name is None:
             name = 'straight'
-        assert width is not None
+        #assert width is not None
+        if width is None:
+            width = 0.0
         with Cell(name=name, cnt=True) as guide:
             guide.instantiate = False
             nd.Pin(name='a0', width=width, xs=xs, show=True).put(0, 0, 180)
