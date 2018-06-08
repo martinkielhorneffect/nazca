@@ -59,7 +59,7 @@ def Tp_DCpad_rectangle(length=100, tab_width=0,
             pdk.addBBmap(name, params=(length, tab_width, "RoundedRectangle"),
                 trans=(0.5*(length-100), 0, 0))
             C.default_pins('c0','c0')
-            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).\
+            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0'], remark='electrical').\
                 put(0.5*bb_length, 0, 180)
 
             pdk.put_stub('c0', length=pinwidth['c0'], shape='circle')
@@ -99,7 +99,7 @@ def Tp_DCpad_circle(diameter=100, pinwidth=None,
             bb_length = diameter + 2*buf_length
 
             C.default_pins('c0', 'c0')
-            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).\
+            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0'], remark='electrical').\
                 put(0.5*bb_length, 0, 180)
 
             pdk.put_stub('c0', length=pinwidth['c0'], shape='circle')
@@ -146,14 +146,14 @@ def Tp_DCpad_lw(length=100, width=100, pinwidth=None,
             buf = 10
             bb_width = width + buf
             bb_length = length + buf
-            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).\
+            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0'], remark='electrical').\
                 put(0.5*bb_length, 0, 180)
             pdk.put_stub('c0', length=pinwidth['c0'], shape='circle')
             pdk.put_boundingbox('org', bb_length, bb_width)
 
             for lay, grow, acc in nd.layeriter(xs['c0']):
                 pad = nd.geom.rounded_rect(
-                    length=length+grow, height=width, position='5')
+                    length=length+grow, height=width, position=5)
                 nd.Polygon(layer=lay, points=pad).\
                     put(C.pin['c0'])
         return C
@@ -179,7 +179,7 @@ def Tp_RFpad(length=100, width=100, pinwidth=None,
             C.default_pins('c0','c0')
             C.groupname = groupname
 
-            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).put(0, 0, 180)
+            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0'], remark='electrical').put(0, 0, 180)
 
             pdk.put_stub('c0')
             pdk.put_boundingbox('org', length, width)

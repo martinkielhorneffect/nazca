@@ -337,7 +337,7 @@ def Tp_IOtrapezoid(length=100, width=3.5, angle=-7, pinwidth=None, name='io',
                 outline = nd.geom.trapezoid(
                     length=length/cos(anglerad)+grow*tan(abs(anglerad)),
                     height=width+2*grow, angle1=90+angle, angle2=90,
-                    position='2')
+                    position=2)
                 nd.Polygon(layer=lay, points=outline).put(0)
             cfg.cp = C.pin['b0']
             C.groupname = groupname

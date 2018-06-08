@@ -111,20 +111,19 @@ def mid_pts(p1, p2, factor=0):
     return X, Y
 
 
-def read_4positions(position='1', pts={}, shift=(0,0)):
+def read_4positions(position=1, pts={}, shift=(0,0)):
     """Return 4 corner points based on position
     """
-    position = str(position)
-    Points = {'1' : pts['P1'],
-              '2' : mid_pts(pts['P1'], pts['P4'], 0.5),
-              '3' : pts['P4'],
-              '4' : mid_pts(pts['P1'], pts['P2'], 0.5),
-              '5' : mid_pts(mid_pts(pts['P1'], pts['P2'], 0.5),
-                    mid_pts(pts['P4'], pts['P3'], 0.5), 0.5),
-              '6' : mid_pts(pts['P4'], pts['P3'], 0.5),
-              '7' : pts['P2'],
-              '8' : mid_pts(pts['P2'], pts['P3'], 0.5),
-              '9' : pts['P3']
+    Points = {1 : pts['P1'],
+              2 : mid_pts(pts['P1'], pts['P4'], 0.5),
+              3 : pts['P4'],
+              4 : mid_pts(pts['P1'], pts['P2'], 0.5),
+              5 : mid_pts(mid_pts(pts['P1'], pts['P2'], 0.5),
+                  mid_pts(pts['P4'], pts['P3'], 0.5), 0.5),
+              6 : mid_pts(pts['P4'], pts['P3'], 0.5),
+              7 : pts['P2'],
+              8 : mid_pts(pts['P2'], pts['P3'], 0.5),
+              9 : pts['P3']
              }
 
     new_pts = [(),(),(),()]
@@ -135,7 +134,7 @@ def read_4positions(position='1', pts={}, shift=(0,0)):
     return new_pts
 
 
-def trapezoid(length=10, height=4, angle1=45, angle2=45, position='1', shift=(0,0)):
+def trapezoid(length=10, height=4, angle1=45, angle2=45, position=1, shift=(0,0)):
     """Return trapezoid polygon.
     """
     x1 = height/tan(radians(angle1))
@@ -149,7 +148,7 @@ def trapezoid(length=10, height=4, angle1=45, angle2=45, position='1', shift=(0,
     return read_4positions(position, pts, shift)
 
 
-def tetragon(length=5, height=10, dx=4, x=10, position='1', shift=(0,0)):
+def tetragon(length=5, height=10, dx=4, x=10, position=1, shift=(0,0)):
     """Return tetragon polygon.
     """
 
@@ -161,8 +160,21 @@ def tetragon(length=5, height=10, dx=4, x=10, position='1', shift=(0,0)):
     return read_4positions(position, pts, shift)
 
 
-def parallelogram2(length=10, height=5, angle=45, position='1', shift=(0,0)):
+def parallelogram2(length=10, height=5, angle=45, position=1, shift=(0,0)):
     """Return parallelogram polygon.
+
+    Args:
+        length (float): length of bounding box of parallelogram
+        height (float): height of parallelogram
+        angle (float): side angle where 90 degrees gives a rectangle
+        position (int): 1-9, position of origin
+            3 6 9
+            2 5 8
+            1 4 7
+        shift (point): (sx, sy) shift of origin
+
+    Return:
+        4 parallelogram coordinate points
     """
     x = height/tan(radians(angle))
     length = length-height*tan(radians(90-angle))
@@ -175,8 +187,21 @@ def parallelogram2(length=10, height=5, angle=45, position='1', shift=(0,0)):
     return read_4positions(position, pts, shift)
 
 
-def parallelogram(length=10, height=5, angle=45, position='1', shift=(0,0)):
+def parallelogram(length=10, height=5, angle=45, position=1, shift=(0,0)):
     """Return parallelogram polygon.
+
+    Args:
+        length (float): length of base
+        height (float): height of parallelogram
+        angle (float): side angle where 90 degrees gives a rectangle
+        position (int): 1-9, position of origin
+            3 6 9
+            2 5 8
+            1 4 7
+        shift (point): (sx, sy) shift of origin
+
+    Return:
+        4 parallelogram coordinate points
     """
     x = height/tan(radians(angle))
 
@@ -188,7 +213,7 @@ def parallelogram(length=10, height=5, angle=45, position='1', shift=(0,0)):
     return read_4positions(position, pts, shift)
 
 
-def rhombus(length=10, angle=45, position='1', shift=(0,0)):
+def rhombus(length=10, angle=45, position=1, shift=(0,0)):
     """Return rhombus polygon.
     """
     x = length*cos(radians(angle))
@@ -202,7 +227,7 @@ def rhombus(length=10, angle=45, position='1', shift=(0,0)):
     return read_4positions(position, pts, shift)
 
 
-def square(length=10, position='1', shift=(0,0)):
+def square(length=10, position=1, shift=(0,0)):
     """Return square polygon.
     """
     pts = {'P1' : (0, 0),
@@ -213,7 +238,7 @@ def square(length=10, position='1', shift=(0,0)):
     return read_4positions(position, pts, shift)
 
 
-def rectangle(length=10, height=5, position='1', shift=(0,0)):
+def rectangle(length=10, height=5, position=1, shift=(0,0)):
     """Return rectangle polygon.
     """
     pts = {'P1' : (0, 0),
@@ -224,7 +249,7 @@ def rectangle(length=10, height=5, position='1', shift=(0,0)):
     return read_4positions(position, pts, shift)
 
 
-def rounded_rect(length=10, height=7, position='1', shift=(0,0), shrink=0.1, accuracy=0.05):
+def rounded_rect(length=10, height=7, position=1, shift=(0,0), shrink=0.1, accuracy=0.05):
     """Return rectangle polygon with rounded corners."""
     rect = rectangle(length, height, position, shift)
     shrink = min(height, length) * shrink

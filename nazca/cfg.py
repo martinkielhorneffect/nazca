@@ -1,3 +1,4 @@
+
 #-----------------------------------------------------------------------
 # This file is part of Nazca.
 #
@@ -33,6 +34,13 @@ def formatplot():
      plt.rc('font', **font)
 
 
+matplotlib_font = {
+    #'family': 'normal',
+    'style' : 'normal',
+    'weight': 'normal', #'light', 'normal', 'medium', 'semibold', 'bold', 'heavy', 'black'
+    'size'  : 12}
+
+
 #==============================================================================
 # figsize for mode field plots
 #==============================================================================
@@ -50,13 +58,22 @@ drc_ring_xs = (12, 1)
 # Cell related variables
 #==============================================================================
 defaultcellname = 'nazca'
-cellnames = dict()
-cells = [] # list of all cells that have defined (cells not instances)
+cells = [] # open cell stack. 'active cell' is cells[-1]
 self = None # active cell reference
+cellnames = dict() # lsit of all cells {cellname: Cell}
+basenames = dict() # {basenames" function_id}
 topcells = [] # Cells that have been collected to be parsed for GDS export
+validate_basename = False # perform validate basenames on substrings if True.
+solve_direct = True
 
 def active_cell():
-    """Get the active cell."""
+    """Get the active cell.
+
+    The 'active cell' is the last opened Cell object that has not been closed yet.
+
+    Returns:
+        Cell: active cell
+    """
     if cells:
         return cells[-1]
     else:
@@ -75,18 +92,32 @@ default_xs = {
     'accuracy' : [0.005],
     'growx': [0],
     'growy': [0],
-    'origin': ['user']
+    'origin': ['nazca']
 }
 default_xs_width = 1.0
 default_xs_radius = 20.0
 
+default_xserror_name = 'error'
+default_xserror = {
+    'name': ['error'],
+    'layer': [1111],
+    'datatype': [1],
+    'accuracy' : [0.005],
+    'growx': [0],
+    'growy': [0],
+    'origin': ['nazca']
+}
+default_xserror_width = 1.0
+default_xserror_radius = 20.0
+
+
 #==============================================================================
 # default mask layers
 #==============================================================================
-default_dump_layer = 1001
+default_dump_layer = (1111, 0)
+default_error_layer = (1111, 1)
 default_layer_AnnotationPin = default_dump_layer
 default_layer_FiberIO = default_dump_layer
-
 
 
 layerdict = dict()
@@ -95,7 +126,7 @@ xsmap = None #map scriptnames of xs to technology names of xs.
 
 share = set() # set of cellname not to prefix.
 #some cells may enter the design through different sub-gds files.
-#There may be case where the can be considered to be the same cell.
+#There may be cases where the can be considered to be the same cell.
 
 stubmap = {}
 
@@ -122,28 +153,46 @@ default_layers = {
     'bbox_pin_text':     (1024, 0),
     }
 
-
-bb_pin_shape = 'arrow_full'
-bb_pin_size = 1.0
-
-bbox_pin_size = 0.75
-bbox_stubs = True # add stubs to the cell bounding box
-
 cellname_max_height = 50
 cellname_scaling = 0.5
 
+stub_default_annotation_layer = 'bb_pin_text'
+bbox_stubs = True # add stubs to the cell bounding box
 
 # =============================================================================
 # pin shapes
 # =============================================================================
-#normalized to 1
+# shapes are normalized to 1
 pinshapes = {
-    'arrow_full': [(0, 0), (-0.5, -0.5), (-0.5, -0.25), (-0.7, -0.25), (-0.7, 0.25), (-0.5, 0.25), (-0.5, 0.5)],
+    'arrow_full': [(0, 0), (-0.5, -0.5), (-0.5, -0.25), (-0.7, -0.25),
+        (-0.7, 0.25), (-0.5, 0.25), (-0.5, 0.5)],
     'arrow_lefthalf': [(0, 0), (-0.5, 0.5), (-0.5, 0.25), (-0.7, 0.25), (-0.7, 0)],
     'arrow_righthalf': [(0, 0), (-0.5, -0.5), (-0.5, -0.25), (-0.7, -0.25), (-0.7, 0)],
     'circle': [(0.5, 0), (0.353, 0.353), (0, 0.5), (-0.353, 0.353), (-0.5, 0),
-               (-0.353, -0.353), (0, -0.5), (0.353, -0.353)]
+        (-0.353, -0.353), (0, -0.5), (0.353, -0.353)]
 }
+
+
+def reset_pin_settings():
+    global pin_settings
+    pin_settings = {
+        'bb_pin_shape': 'arrow_full',
+        'bb_pin_size': 1.0,
+        'bb_pin_layer':  default_layers['bb_pin'],
+        'bb_pin_annotation_layer': default_layers['bb_pin_text'],
+        'bb_pin_annotation_move': (-0.3, 0),
+        'bbox_pin_size': 1.0,
+        'stub_length': 2.0
+        }
+reset_pin_settings()
+overrule_pdk_pinstyle = None #set before loading a foundry to update pin representation
+documentation_pin_layer = (60000, 0)
+
+# =============================================================================
+# pin adb stub properties
+# =============================================================================
+pin_instantiate = False
+stub_instantiate = False
 
 
 #==============================================================================
@@ -170,50 +219,5 @@ spt = False
 
 def gds_cellname_cleanup(name):
     return name
-
-
-# =============================================================================
-# Tracing elements
-# =============================================================================
-_trace_id = -1
-_trace_ids = set()
-traces = defaultdict(list)
-
-def trace_start(trace_id=None):
-    global _trace_id, _trace_ids
-    _trace_id += 1
-    if trace_id is None:
-        trace_id = _trace_id
-    if trace_id not in _trace_ids:
-        _trace_ids.add(trace_id)
-    else:
-        print("Warning: starting already active trace_id = {} in trace_start.".\
-           format(trace_id))
-    if trace_id in traces.keys():
-        print("Warning: reusing trace_id = {} in trace_start\n"\
-              "  This will extend the trace, not start a new one!".format(trace_id))
-
-def trace_stop(trace_id=None):
-    global _trace_id, _trace_ids
-    if trace_id is None:
-         trace_id = _trace_id
-    if trace_id in _trace_ids:
-        _trace_ids.remove(trace_id)
-    else:
-        print("Warning: Trying to stop already stopped trace id={}.".\
-            format(trace_id))
-
-def trace_length(trace_id=None):
-    if trace_id is None:
-        trace_id = _trace_id
-    length = 0
-    for elm in traces[trace_id]:
-        try:
-            L = elm.cnode.cell.length_geo
-            length += L
-            #print(elm, L)
-        except:
-            pass
-    return length
 
 

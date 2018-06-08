@@ -37,6 +37,7 @@ To see the available building block and there details
 
 import os
 
+
 import nazca as nd
 import nazca.pdk_template as pdk
 import nazca.interconnects as interconnect
@@ -44,6 +45,14 @@ import nazca.icons as icons
 
 dir_path = os.path.dirname(os.path.abspath(__file__))
 
+
+pin_style = {
+    'bb_pin_shape': 'arrow_full',
+    'bb_pin_size': 3.0,
+    'bbox_pin_size': 2.0,
+    'stub_length': 4.0
+    }
+nd.set_pdk_pinstyle(pin_style)
 
 
 #==============================================================================
@@ -190,8 +199,8 @@ BBfunctioncalls.append('mmi2x2_dp()')
 #==============================================================================
 # modulators
 #==============================================================================
-@pdk.hashme('_eopm_dc', 'length')
-def _eopm_dc(length=750, contacts=2):
+@pdk.hashme('abb_eopm_dc', 'length')
+def abb_eopm_dc(length=750, contacts=2):
     """Create an electro-optic phase modulator cell.
 
     Args:
@@ -226,7 +235,7 @@ def _eopm_dc(length=750, contacts=2):
         icons.icon_strt(length, width, bufx=0, bufy=10, layer='MetalDCIcon').put('cc', 0, 'cc')
         icons.icon_strt(length, width, bufx=10, bufy=-8, layer='DeepIcon').put('cc', 0, 'cc')
     return C
-BBfunctioncalls.append('soa()')
+BBfunctioncalls.append('abb_eopm_dc()')
 
 
 #==============================================================================
@@ -246,8 +255,8 @@ BBfunctioncalls.append('pd()')
 #==============================================================================
 # laser elements
 #==============================================================================
-@pdk.hashme('soa', 'length')
-def soa(length=100):
+@pdk.hashme('soa', 'length', 'pad')
+def soa(length=100, pad=True):
     """Create a SOA cell.
 
     Args:
@@ -256,7 +265,11 @@ def soa(length=100):
     Returns:
         Cell: SOA element
     """
-    width = 200
+    if pad:
+        width = 200
+    else:
+        width = 50
+
     h = -70
     with nd.Cell(hashme=True) as C:
         nd.Pin(name='a0', xs='Active', width=wact).put(0, h, 180)
@@ -345,7 +358,7 @@ BBfunctioncalls.append('phase_shifter()')
 
 
 def Tp_isolation(name='isolation', length=100, xs=None, width=None, layer=None):
-    @pdk.hashme('isolation', 'length')
+    @pdk.hashme(name, 'length')
     def isolation(length=length):
         """Create a p-isolation cell.
 
@@ -423,7 +436,7 @@ def eopm_dc(length=1000, pads=False, sep=10):
     """
     contacts = 2
     with nd.Cell(hashme=True) as C:
-        E1 = _eopm_dc(length=length, contacts=contacts).put(0)
+        E1 = abb_eopm_dc(length=length, contacts=contacts).put(0)
         if pads:
             for i in range(contacts):
                 pname = 'c'+str(i)
@@ -460,74 +473,6 @@ def pd_dc(length=100, pads=False, dy=0):
             E1.raise_pins()
     return C
 BBfunctioncalls.append('pd_dc()')
-
-
-@pdk.hashme('dbr_laser', 'Ldbr1', 'Ldbr2', 'Lsoa', 'Lpm')
-def dbr_laser(Ldbr1=50, Ldbr2=500, Lsoa=750, Lpm=70):
-    """Create a parametrized dbr laser building block."""
-    Liso = 20
-    with nd.Cell(hashme=True) as laser:
-        #create an isolation cell for reuse
-        iso = isolation_act(length=Liso)
-
-        #draw the laser
-        s2a1 = s2a().put(0)
-        iso.put()
-        dbr1 = dbr(length=Ldbr1).put()
-        iso.put()
-        soa1 = soa(length=Lsoa).put()
-        iso.put()
-        phase1 = phase_shifter(length=Lpm).put()
-        iso.put()
-        dbr2 = dbr(length=Ldbr2).put()
-        iso.put()
-        a2s1 = a2s().put()
-
-
-        # add pins to the laser building block
-        nd.Pin('a0', pin=s2a1.pin['a0']).put()
-        nd.Pin('b0', pin=a2s1.pin['b0']).put()
-        nd.Pin('c0', pin=dbr1.pin['c0']).put()
-        nd.Pin('c1', pin=soa1.pin['c0']).put()
-        nd.Pin('c2', pin=phase1.pin['c0']).put()
-        nd.Pin('c3', pin=dbr2.pin['c0']).put()
-        pdk.put_stub()
-
-        length, y, a = nd.diff(laser.pin['a0'], laser.pin['b0'])
-        pdk.put_boundingbox('org', length=abs(length), width=200, align='lb',
-            move=(0, -30, 0))
-    return laser
-BBfunctioncalls.append('dbr_laser()')
-
-
-@pdk.hashme('mzi', 'length', 'sep')
-def mzi(length=1000, sep=50):
-    with nd.Cell(hashme=True) as mziBB:
-        eopm = eopm_dc(length=length, pads=True, sep=40)
-        mmi_left  = mmi2x2_dp().put('lc')
-        deep.sbend(offset=sep).put(mmi_left.pin['b0'])
-        eopm_top = eopm.put()
-        deep.sbend(offset=-sep).put()
-        mmi_right = mmi2x2_dp().put()
-
-        deep.sbend(offset=-sep).put(mmi_left.pin['b1'])
-        eopm_bot = eopm.put(flip=True)
-        deep.sbend(offset=sep).put()
-
-        nd.Pin('a0', pin=mmi_left.pin['a0']).put()
-        nd.Pin('a1', pin=mmi_left.pin['a1']).put()
-        nd.Pin('b0', pin=mmi_right.pin['b0']).put()
-        nd.Pin('b1', pin=mmi_right.pin['b1']).put()
-        nd.Pin('c0', pin=eopm_top.pin['c0']).put()
-        nd.Pin('c1', pin=eopm_top.pin['c1']).put()
-        nd.Pin('d0', pin=eopm_bot.pin['c0']).put()
-        nd.Pin('d1', pin=eopm_bot.pin['c1']).put()
-        pdk.put_stub()
-
-        bb_length, y, a = nd.diff(mziBB.pin['a0'], mziBB.pin['b0'])
-        pdk.put_boundingbox('org', length=abs(bb_length), width=2*sep+428)
-    return mziBB
-BBfunctioncalls.append('mzi()')
 
 
 #==============================================================================
@@ -603,6 +548,74 @@ def io(shape=None, width=3.0, bend=False, deep=False):
     return C
 
 
+# =============================================================================
+# COMPOSITE BBs
+# =============================================================================
+@pdk.hashme('dbr_laser', 'Ldbr1', 'Ldbr2', 'Lsoa', 'Lpm')
+def dbr_laser(Ldbr1=50, Ldbr2=500, Lsoa=750, Lpm=70):
+    """Create a parametrized dbr laser building block."""
+    Liso = 20
+    with nd.Cell(hashme=True) as laser:
+        #create an isolation cell for reuse
+        iso = isolation_act(length=Liso)
+
+        #draw the laser
+        s2a1 = s2a().put(0)
+        iso.put()
+        dbr1 = dbr(length=Ldbr1).put()
+        iso.put()
+        soa1 = soa(length=Lsoa).put()
+        iso.put()
+        phase1 = phase_shifter(length=Lpm).put()
+        iso.put()
+        dbr2 = dbr(length=Ldbr2).put()
+        iso.put()
+        a2s1 = a2s().put()
+
+        # add pins to the laser building block
+        nd.Pin('a0', pin=s2a1.pin['a0']).put()
+        nd.Pin('b0', pin=a2s1.pin['b0']).put()
+        nd.Pin('c0', pin=dbr1.pin['c0']).put()
+        nd.Pin('c1', pin=soa1.pin['c0']).put()
+        nd.Pin('c2', pin=phase1.pin['c0']).put()
+        nd.Pin('c3', pin=dbr2.pin['c0']).put()
+        pdk.put_stub()
+
+        length, y, a = nd.diff(laser.pin['a0'], laser.pin['b0'])
+        pdk.put_boundingbox('org', length=abs(length), width=200, align='lb',
+            move=(0, -30, 0))
+    return laser
+BBfunctioncalls.append('dbr_laser()')
+
+
+@pdk.hashme('mzi', 'length', 'sep')
+def mzi(length=1000, sep=50):
+    with nd.Cell(hashme=True) as mziBB:
+        eopm = eopm_dc(length=length, pads=True, sep=40)
+        mmi_left  = mmi2x2_dp().put('lc')
+        deep.sbend(offset=sep).put(mmi_left.pin['b0'])
+        eopm_top = eopm.put()
+        deep.sbend(offset=-sep).put()
+        mmi_right = mmi2x2_dp().put()
+
+        deep.sbend(offset=-sep).put(mmi_left.pin['b1'])
+        eopm_bot = eopm.put(flip=True)
+        deep.sbend(offset=sep).put()
+
+        nd.Pin('a0', pin=mmi_left.pin['a0']).put()
+        nd.Pin('a1', pin=mmi_left.pin['a1']).put()
+        nd.Pin('b0', pin=mmi_right.pin['b0']).put()
+        nd.Pin('b1', pin=mmi_right.pin['b1']).put()
+        nd.Pin('c0', pin=eopm_top.pin['c0']).put()
+        nd.Pin('c1', pin=eopm_top.pin['c1']).put()
+        nd.Pin('d0', pin=eopm_bot.pin['c0']).put()
+        nd.Pin('d1', pin=eopm_bot.pin['c1']).put()
+        pdk.put_stub()
+
+        bb_length, y, a = nd.diff(mziBB.pin['a0'], mziBB.pin['b0'])
+        pdk.put_boundingbox('org', length=abs(bb_length), width=2*sep+428)
+    return mziBB
+BBfunctioncalls.append('mzi()')
 
 
 #==============================================================================
@@ -613,15 +626,15 @@ with nd.Cell('awg1x4') as awg1x4:
     awg = nd.load_gds(
         filename= os.path.join(dir_path, 'gdsBB', 'AWG_1x4.gds'),
         cellname='awg',
-        newcellname='awg',
+        newcellname='demo_awg',
         layermap={1:3})
     awg.put()
 
-    nd.Pin('a0', xs='Deep', width=wdeep).put((9.184851e-016,-5,-90))
-    nd.Pin('b0', xs='Deep', width=wdeep).put((273.63575,-4.5798919,-85.569401))
-    nd.Pin('b1', xs='Deep', width=wdeep).put((269.89849,-4.9532407,-88.523134))
-    nd.Pin('b2', xs='Deep', width=wdeep).put((266.1423,-4.9532407,-91.476866))
-    nd.Pin('b3', xs='Deep', width=wdeep).put((262.40504,-4.5798919,-94.430599))
+    nd.Pin('a0', xs='Deep', width=wdeep).put((9.184851e-016, -5, -90))
+    nd.Pin('b0', xs='Deep', width=wdeep).put((273.63575, -4.5798919, -85.569401))
+    nd.Pin('b1', xs='Deep', width=wdeep).put((269.89849, -4.9532407, -88.523134))
+    nd.Pin('b2', xs='Deep', width=wdeep).put((266.1423, -4.9532407, -91.476866))
+    nd.Pin('b3', xs='Deep', width=wdeep).put((262.40504, -4.5798919, -94.430599))
     pdk.put_stub(['a0', 'b0', 'b1', 'b2', 'b3'])
 
 #BBfunctioncalls.append('awg1x4')

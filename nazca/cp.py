@@ -51,6 +51,10 @@ def goto(x=0, y=0, a=0):
     cfg.cp.goto(x, y, a)
     return cfg.cp
 
+def goto_pin(p):
+    cfg.cp = p
+    return cfg.cp
+
 def move(x=0, y=0, a=0):
     cfg.cp = cfg.cp.move(x, y, a)
     return cfg.cp

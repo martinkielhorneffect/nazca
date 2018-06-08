@@ -41,6 +41,7 @@ to a waveguide or metal line. The following properies of the xsection can be set
 
 import os
 import nazca as nd
+from math import copysign
 
 # full path of the (demo) directory that has __init__ file.
 dir_path = os.path.dirname(__file__)
@@ -78,7 +79,8 @@ def os_shallow(width, radius):
     Returns:
         float: offset value
     """
-    return 0.1
+    offset = min(0.1*(200/radius)**2, xsShallow.width*0.4)
+    return copysign(offset, radius)
 
 def os_deep(width, radius):
     """Offset straight to bend for deep waveguides.
@@ -90,7 +92,8 @@ def os_deep(width, radius):
     Returns:
         float: offset value
     """
-    return 0.05
+    offset = min(0.05*(30/radius)**2, xsDeep.width*0.4)
+    return copysign(offset, radius)
 
 
 #==============================================================================

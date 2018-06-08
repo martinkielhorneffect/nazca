@@ -44,7 +44,7 @@ def map_0_360(a):
     return a - 360 * (a // 360)
 
 # GDSII record types
-class gds_record:
+class GDS_record:
     """Define gds record names."""
     HEADER, BGNLIB, LIBNAME, UNITS, ENDLIB, BGNSTR, STRNAME, ENDSTR, \
     BOUNDARY, PATH, SREF, AREF, TEXT, LAYER, DATATYPE, WIDTH, XY, ENDEL, \
@@ -71,7 +71,7 @@ class gds_record:
             'nodeport', 'userconstraint', 'spacer_error', 'contact')
 
 # GDSII data values
-class gds_value:
+class GDS_datatype:
     """Define gds record values."""
     NODATA, BITARRAY, INT16, INT32, REAL4, REAL8, ASCII = list(range(7))
     name = ('nodata', 'bitarray', 'int16', 'int32', 'real4', 'real8',
@@ -144,14 +144,14 @@ def pack_padstring(bytestring):
 # GDS records
 def gds_header(): # Record length = 4 + 2
     return pack_int16(6) \
-         + pack_uint8(gds_record.HEADER) \
-         + pack_uint8(gds_value.INT16) \
+         + pack_uint8(GDS_record.HEADER) \
+         + pack_uint8(GDS_datatype.INT16) \
          + pack_int16(0x0258) # software version
 
 def gds_bgnlib(lcltm=None): # Record length = 4 + 2*12
     return pack_int16(28) \
-         + pack_uint8(gds_record.BGNLIB) \
-         + pack_uint8(gds_value.INT16) \
+         + pack_uint8(GDS_record.BGNLIB) \
+         + pack_uint8(GDS_datatype.INT16) \
          + pack_datime(lcltm) \
          + pack_datime(lcltm) # Creation and modification dates
 
@@ -161,52 +161,52 @@ def gds_libname(string): # Record length = 4 + strlen
     if l & 1:
         l += 1
     return pack_int16(4 + l) \
-         + pack_uint8(gds_record.LIBNAME) \
-         + pack_uint8(gds_value.ASCII) \
+         + pack_uint8(GDS_record.LIBNAME) \
+         + pack_uint8(GDS_datatype.ASCII) \
          + pack_padstring(name)
 
 def gds_units(): # Record length = 4 + 2*8
     return pack_int16(20) \
-         + pack_uint8(gds_record.UNITS) \
-         + pack_uint8(gds_value.REAL8) \
+         + pack_uint8(GDS_record.UNITS) \
+         + pack_uint8(GDS_datatype.REAL8) \
          + pack_real8(gds_db_user) \
          + pack_real8(gds_db_unit)
 
 def gds_nodata(rec): # Record length = 4
     return pack_int16(4) \
          + pack_uint8(rec) \
-         + pack_uint8(gds_value.NODATA)
+         + pack_uint8(GDS_datatype.NODATA)
 
 def gds_bgnstr(lcltm=None): # Record length = 4 + 2*12
     return pack_int16(28) \
-         + pack_uint8(gds_record.BGNSTR) \
-         + pack_uint8(gds_value.INT16) \
+         + pack_uint8(GDS_record.BGNSTR) \
+         + pack_uint8(GDS_datatype.INT16) \
          + pack_datime(lcltm) \
          + pack_datime(lcltm) # Creation and modification dates
 
 def gds_sref():
-    return gds_nodata(gds_record.SREF)
+    return gds_nodata(GDS_record.SREF)
 
 def gds_aref():
-    return gds_nodata(gds_record.AREF)
+    return gds_nodata(GDS_record.AREF)
 
 def gds_endstr():
-    return gds_nodata(gds_record.ENDSTR)
+    return gds_nodata(GDS_record.ENDSTR)
 
 def gds_path():
-    return gds_nodata(gds_record.PATH)
+    return gds_nodata(GDS_record.PATH)
 
 def gds_boundary():
-    return gds_nodata(gds_record.BOUNDARY)
+    return gds_nodata(GDS_record.BOUNDARY)
 
 def gds_endel():
-    return gds_nodata(gds_record.ENDEL)
+    return gds_nodata(GDS_record.ENDEL)
 
 def gds_endlib():
-    return gds_nodata(gds_record.ENDLIB)
+    return gds_nodata(GDS_record.ENDLIB)
 
 def gds_text():
-    return gds_nodata(gds_record.TEXT)
+    return gds_nodata(GDS_record.TEXT)
 
 def gds_strname(string): # Record length = 4 + strlen
     name = bytearray(string, encoding="UTF-8")
@@ -214,8 +214,8 @@ def gds_strname(string): # Record length = 4 + strlen
     if l & 1:
         l += 1
     return pack_int16(4 + l) \
-         + pack_uint8(gds_record.STRNAME) \
-         + pack_uint8(gds_value.ASCII) \
+         + pack_uint8(GDS_record.STRNAME) \
+         + pack_uint8(GDS_datatype.ASCII) \
          + pack_padstring(name)
 
 def gds_string(string): # Record length = 4 + strlen
@@ -224,32 +224,32 @@ def gds_string(string): # Record length = 4 + strlen
     if l & 1:
         l += 1
     return pack_int16(4 + l) \
-         + pack_uint8(gds_record.STRING) \
-         + pack_uint8(gds_value.ASCII) \
+         + pack_uint8(GDS_record.STRING) \
+         + pack_uint8(GDS_datatype.ASCII) \
          + pack_padstring(name)
 
 def gds_layer(lay): # Record length = 4 + 2
     return pack_int16(6) \
-         + pack_uint8(gds_record.LAYER) \
-         + pack_uint8(gds_value.INT16) \
-         + pack_int16(lay)
+         + pack_uint8(GDS_record.LAYER) \
+         + pack_uint8(GDS_datatype.INT16) \
+         + pack_uint16(lay)
 
 def gds_datatype(datatype): # Record length = 4 + 2
     return pack_int16(6) \
-         + pack_uint8(gds_record.DATATYPE) \
-         + pack_uint8(gds_value.INT16) \
+         + pack_uint8(GDS_record.DATATYPE) \
+         + pack_uint8(GDS_datatype.INT16) \
          + pack_int16(datatype)
 
 def gds_width(w): # Record length = 4 + 4
     return pack_int16(8) \
-         + pack_uint8(gds_record.WIDTH) \
-         + pack_uint8(gds_value.INT32) \
+         + pack_uint8(GDS_record.WIDTH) \
+         + pack_uint8(GDS_datatype.INT32) \
          + pack_int32(round_to_db_unit(w))
 
 def gds_colrow(col, row): # Record length = 4 + 4
     return pack_int16(8) \
-         + pack_uint8(gds_record.COLROW) \
-         + pack_uint8(gds_value.INT16) \
+         + pack_uint8(GDS_record.COLROW) \
+         + pack_uint8(GDS_datatype.INT16) \
          + pack_uint16(col) \
          + pack_uint16(row) \
 
@@ -265,8 +265,8 @@ def gds_xy(XY, close, min_length=1):
     n = len(xy)
     if n < min_length:
         return None
-    rec = bytearray(pack_int16(4 + 8 * n)) # Record length = 4 + 4*2*n
-    rec.extend(pack_uint8(gds_record.XY) + pack_uint8(gds_value.INT32))
+    rec = bytearray(pack_uint16(4 + 8 * n)) # Record length = 4 + 4*2*n
+    rec.extend(pack_uint8(GDS_record.XY) + pack_uint8(GDS_datatype.INT32))
     for (x,y) in xy:
         rec.extend(pack_int32(x) + pack_int32(y))
     return rec
@@ -277,38 +277,38 @@ def gds_sname(string): # Record length = 4 + strlen
     l = len(name)
     if l & 1: l += 1
     return pack_int16(4 + l) \
-         + pack_uint8(gds_record.SNAME) \
-         + pack_uint8(gds_value.ASCII) \
+         + pack_uint8(GDS_record.SNAME) \
+         + pack_uint8(GDS_datatype.ASCII) \
          + pack_padstring(name)
 
 def gds_strans(bits): # Record length = 4 + 2
     return pack_int16(6) \
-         + pack_uint8(gds_record.STRANS) \
-         + pack_uint8(gds_value.BITARRAY) \
+         + pack_uint8(GDS_record.STRANS) \
+         + pack_uint8(GDS_datatype.BITARRAY) \
          + pack_uint16(bits)
 
 def gds_mag(mag): # Record length = 4 + 8
     return pack_int16(12) \
-         + pack_uint8(gds_record.MAG) \
-         + pack_uint8(gds_value.REAL8) \
+         + pack_uint8(GDS_record.MAG) \
+         + pack_uint8(GDS_datatype.REAL8) \
          + pack_real8(mag)
 
 def gds_angle(ang): # Record length = 4 + 8
     return pack_int16(12) \
-         + pack_uint8(gds_record.ANGLE) \
-         + pack_uint8(gds_value.REAL8) \
+         + pack_uint8(GDS_record.ANGLE) \
+         + pack_uint8(GDS_datatype.REAL8) \
          + pack_real8(map_0_360(ang))
 
 def gds_texttype(texttype): # Record length = 4 + 2
     return pack_int16(6) \
-         + pack_uint8(gds_record.TEXTTYPE) \
-         + pack_uint8(gds_value.INT16) \
+         + pack_uint8(GDS_record.TEXTTYPE) \
+         + pack_uint8(GDS_datatype.INT16) \
          + pack_int16(texttype)
 
 def gds_pathtype(pathtype): # Record length = 4 + 2
     return pack_int16(6) \
-         + pack_uint8(gds_record.PATHTYPE) \
-         + pack_uint8(gds_value.INT16) \
+         + pack_uint8(GDS_record.PATHTYPE) \
+         + pack_uint8(GDS_datatype.INT16) \
          + pack_int16(pathtype)
 
 def gds_annotation(lay, xy, string, datatype=0):

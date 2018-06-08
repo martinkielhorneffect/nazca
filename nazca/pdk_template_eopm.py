@@ -68,8 +68,8 @@ def Tp_EOPM_DC(
             pdk.addBBmap(name, params=(length))
 
             # modulator section:
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0']).put(0, 0, 180)
-            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0']).put(length)
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, 0, 180)
+            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='optical').put(length)
 
             # x-positions of pads:
             L = 0.5*(length - pinwidth['c0'])
@@ -118,7 +118,7 @@ def Tp_EOPM_RF(
         function returning a cell: eopm(length, pad, padangle1, padangle2)
     """
     @pdk.hashme(name, 'length', 'pads')
-    def cell(length=length, pads=pads, padangle1=padangle1, padangle2=padangle2):
+    def cell(length=length, pads=pads):
         """Create a EOPM_RF cell.
 
         Args:
@@ -135,14 +135,14 @@ def Tp_EOPM_RF(
             pdk.addBBmap(name, params=(length))
 
             wmet=pinwidth['c0']
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0']).put(0, 0, 180)
-            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0']).put(length, 0)
-            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).put(dx_metal, dy_metal+rfpitch+wmet, 180)
-            nd.Pin(name='c1', xs=xs['c1'], width=pinwidth['c1']).put(dx_metal, dy_metal, 180)
-            nd.Pin(name='c2', xs=xs['c2'], width=pinwidth['c2']).put(dx_metal, dy_metal-rfpitch-wmet, 180)
-            nd.Pin(name='d0', xs=xs['d0'], width=pinwidth['d0']).put(length-dx_metal, dy_metal+rfpitch+wmet)
-            nd.Pin(name='d1', xs=xs['d1'], width=pinwidth['d1']).put(length-dx_metal, dy_metal)
-            nd.Pin(name='d2', xs=xs['d2'], width=pinwidth['d2']).put(length-dx_metal, dy_metal-rfpitch-wmet)
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, 0, 180)
+            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='optical').put(length, 0)
+            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0'], remark='gnd').put(dx_metal, dy_metal+rfpitch+wmet, 180)
+            nd.Pin(name='c1', xs=xs['c1'], width=pinwidth['c1'], remark='signal').put(dx_metal, dy_metal, 180)
+            nd.Pin(name='c2', xs=xs['c2'], width=pinwidth['c2'], remark='gnd').put(dx_metal, dy_metal-rfpitch-wmet, 180)
+            nd.Pin(name='d0', xs=xs['d0'], width=pinwidth['d0'], remark='gnd').put(length-dx_metal, dy_metal+rfpitch+wmet)
+            nd.Pin(name='d1', xs=xs['d1'], width=pinwidth['d1'], remark='signal').put(length-dx_metal, dy_metal)
+            nd.Pin(name='d2', xs=xs['d2'], width=pinwidth['d2'], remark='gnd').put(length-dx_metal, dy_metal-rfpitch-wmet)
 
             pdk.put_stub(['a0', 'b0'])
             pdk.put_boundingbox('org', length, width)

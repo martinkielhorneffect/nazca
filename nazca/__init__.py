@@ -38,6 +38,7 @@ from .plotting import *
 from .gds import *
 from .lyp import *
 from .util import *
+from .extras import *
 from .convert_AWGtxt2nazca import *
 from .gds_import import *
 from .gds_base import *

@@ -504,24 +504,29 @@ def get_layer(layer):
             text = 'internal Nazca '
             return layID # avoid warnings
         else:
-            layID = (int(cfg.default_dump_layer), 0)
+            if isinstance(cfg.default_dump_layer, int):
+                layID = (int(cfg.default_dump_layer), 0)
+            elif isinstance(cfg.default_dump_layer, tuple):
+                if len(cfg.default_dump_layer) == 2:
+                    layID = cfg.default_dump_layer
         if layer not in unkown_layers:
-            unkown_layers.add(layer)
-            add_layer(name=str(layer), layer=cfg.default_dump_layer)
             if isinstance(layer, str):
                 print("Warning: {0}layer '{1}' not set. "\
-                      "Redirecting output to layer {2}. "\
+                      "Setting it now and redirecting output to layer {2}. "\
                       "You can explicitly add a new layer by: "\
                       "add_layer(name='{1}', layer=<num>)\n"
-                      "Available layer are:\n{3}".\
-                      format(text, layer, layID, list(cfg.layerdict.keys())))
+                      "Available layers are:\n{3}".\
+                      format(text, layer, layID, sorted(list(cfg.layerdict.keys()))))
             else:
                 print("Warning: layer {0} not set. "\
-                      "Redirecting output to layer {1}. "\
+                      "Redirecting output to collecting layer {1}. "\
                       "You can explicitly add a new layer by: "\
                       "add_layer(name=<name>, layer={0})\n"\
-                      "Available layer are:\n{2}".\
-                     format(layer, layID, list(cfg.layerdict.keys())))
+                      "Available layers are:\n{2}".\
+                     format(layer, layID, sorted(list(cfg.layerdict.keys()))))
+            unkown_layers.add(layer)
+            add_layer(name=str(layer), layer=cfg.default_dump_layer)
+
     return layID
 
 

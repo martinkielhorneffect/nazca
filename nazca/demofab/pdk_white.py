@@ -59,13 +59,13 @@ def soa(length=100):
         #active
         paral = geom.parallelogram2(
             length=length, height=width_active,
-            angle=angle, position='2',
+            angle=angle, position=2,
             shift=(0+0.5*width_active/tan(radians(angle)), 0))
         active = nd.Polygon(layer=50, points=paral).put(0,0,0)
 
         #pad
         rect = geom.rectangle(length=length, height=200,
-             position='2', shift=(0, 30))
+             position=2, shift=(0, 30))
         metal = nd.Polygon(layer=10, points=rect).put(0,0,0)
 
         #waveguide

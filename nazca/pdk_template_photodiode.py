@@ -56,8 +56,8 @@ def Tp_PhotoDetector(
             C.foundry_spt = []
             bb_length = length+buf
             pdk.addBBmap(name, params=(length))
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0']).put(0, 0, 180)
-            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).put(bb_length)
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, 0, 180)
+            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0'], remark='electrical').put(bb_length)
 
             pdk.put_stub(['a0', 'c0'])
             pdk.put_boundingbox('org', bb_length, width)
@@ -91,13 +91,13 @@ def Tp_PhotoDetectorRF(
             C.groupname = groupname
             C.foundry_spt = []
             pdk.addBBmap(name)
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0']).\
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').\
                 put(0, 0, 180)
-            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).\
+            nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0'], remark='gnd').\
                 put(length, cshift-spaceGS-pinwidth['c0'])
-            nd.Pin(name='c1', xs=xs['c1'], width=pinwidth['c1']).\
+            nd.Pin(name='c1', xs=xs['c1'], width=pinwidth['c1'], remark='signal').\
                 put(length, cshift)
-            nd.Pin(name='c2', xs=xs['c2'], width=pinwidth['c2']).\
+            nd.Pin(name='c2', xs=xs['c2'], width=pinwidth['c2'], remark='gnd').\
                 put(length, cshift+spaceGS+pinwidth['c2'])
 
             pdk.put_stub(['a0'])

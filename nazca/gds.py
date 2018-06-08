@@ -39,7 +39,7 @@ Example:
 
         strm += gds.layout_close()
 
-        open(simple_stream.gds, 'bw').write(strm)
+        open('simple_stream.gds', 'bw').write(strm)
 """
 
 from . import gds_base as gbase

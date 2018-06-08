@@ -18,10 +18,10 @@ setup(
             },
 #        include_package_data = True,
         install_requires = [
-            'numpy', 'scipy', 'pandas', 'matplotlib', 'pillow'
+            'numpy', 'scipy', 'pandas', 'matplotlib', 'pillow', 'svgwrite'
             ],
-        version = '0.3-17-g521ccab',
-        description = 'Nazca design',
+        version = '0.4-2-g1e5121b',
+        description = 'Nazca Design',
         author = 'Ronald Broeke, Xaveer Leijtens',
         author_email = 'R.G.Broeke@gmail.com, X.Leijtens@gmail.com',
         url = 'http://nazca-design.org',
@@ -30,7 +30,7 @@ setup(
           'Programming Language :: Python :: 3',
           'License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)',
           'Operating System :: OS Independent',
-          'Development Status :: 3 - Alpha',
+          'Development Status :: 4 - Beta',
           'Topic :: Scientific/Engineering',
           'Topic :: Scientific/Engineering :: Photonic Design Automation (PDA)',
           ],

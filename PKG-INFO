@@ -1,7 +1,7 @@
 Metadata-Version: 1.1
 Name: nazca
-Version: 0.3-17-g521ccab
-Summary: Nazca design
+Version: 0.4-2-g1e5121b
+Summary: Nazca Design
 Home-page: http://nazca-design.org
 Author: Ronald Broeke, Xaveer Leijtens
 Author-email: R.G.Broeke@gmail.com, X.Leijtens@gmail.com
@@ -12,6 +12,6 @@ Classifier: Programming Language :: Python
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)
 Classifier: Operating System :: OS Independent
-Classifier: Development Status :: 3 - Alpha
+Classifier: Development Status :: 4 - Beta
 Classifier: Topic :: Scientific/Engineering
 Classifier: Topic :: Scientific/Engineering :: Photonic Design Automation (PDA)

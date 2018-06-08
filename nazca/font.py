@@ -116,7 +116,7 @@ class Font():
 
         Args:
             text (str): text to display
-            height (float): height off the text in um
+            height (float): height of the text in um
             layer (int | string): layer number or name to place text in
             align (str): relative placement: regex: [lcr][bct] (default = 'lb')
                 examples: 'lc', 'cc', 'tr'
@@ -134,6 +134,7 @@ class Font():
 
             message = nd.text(text='Hello world', align='cc')
             message.put(0)
+            nd.export_plt()
         """
 
         if isinstance(layer, str):
@@ -213,9 +214,10 @@ class Font():
 
         Example::
 
-            cousine = nd.font("cousine")
+            cousine = nd.Font("cousine")
             sample = cousine.sample()
             sample.put()
+            nd.export_plt()
         """
         id5 = md5("{}_{}_{}".format(self.ff, height, layer))
         with Cell('sample_{}_{}'.format(self.ff, id5),

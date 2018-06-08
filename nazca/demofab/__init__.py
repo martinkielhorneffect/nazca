@@ -32,9 +32,11 @@ Note:
     is purely coincidental.
 """
 
+
+from nazca import cfg
 from nazca.demofab.pdk_10_materials import *
 from nazca.demofab.pdk_15_xsections import *
 from nazca.demofab.pdk_20_technology import *
 from nazca.demofab.pdk_30_BB_library import *
 from nazca.demofab.pdk_40_project_templates import *
-
+cfg.reset_pin_settings()

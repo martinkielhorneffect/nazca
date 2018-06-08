@@ -1,4 +1,3 @@
-#!#usr/bin/env python3
 #-----------------------------------------------------------------------
 # This file is part of Nazca.
 #
@@ -19,10 +18,7 @@
 #-----------------------------------------------------------------------
 # -*- coding: utf-8 -*-
 """
-Created on Sun Jan 15 11:24:14 2017
-
-@author: rgb
-Interconnect module.
+Nazca module for interconnecting guides.
 """
 
 import sys
@@ -34,11 +30,12 @@ import nazca.cfg as cfg
 import nazca.cp as cp
 import nazca.geometries as geom
 import nazca.pdk_template_core as tdk
+import nazca.trace as trace
+from .generic_bend import gb_coefficients
 
 
-
-def PosRad(a):
-    """Clip angle to [0, 360>"""
+def posRad(a):
+    """Clip angle to [0, 2pi>."""
     if a < 0:
         pa = a-2*m.pi*(int(a/(2*m.pi)-1))
     else:
@@ -49,13 +46,32 @@ def PosRad(a):
     return pa
 
 
-def NegRad(a):
-    """Clip angle to <-360, 0]"""
-    pn = PosRad(a)-2*m.pi
+def negRad(a):
+    """Clip angle to <-2pi, 0]."""
+    pn = posRad(a)-2*m.pi
     if pn <= -2*m.pi:
         pn = 0
     #printf("pn=", degree(pn), "\n")
     return pn
+
+
+def zeroRad(a):
+    """Clip angle to <-pi, pi]."""
+    a = posRad(a)
+    if a > m.pi:
+        a -= 2*m.pi
+    return a
+
+
+def posDeg(a):
+    return 180*posRad(a*m.pi/180)/m.pi
+
+def negDeg(a):
+    return 180*negRad(a*m.pi/180)/m.pi
+
+def zeroDeg(a):
+    return 180*zeroRad(a*m.pi/180)/m.pi
+
 
 
 class Interconnect():
@@ -67,8 +83,20 @@ class Interconnect():
     Example:
         Create two Interconnect objects, each for a different kind of waveguide::
 
-            ic1 = Interconnect(width=2.0, radius=20)
-            ic2 = Interconnect(width=1.0, radius=50)
+            import nazca as nd
+            import nazca.interconnects as IC
+
+            ic1 = IC.Interconnect(width=2.0, radius=20)
+            ic2 = IC.Interconnect(width=1.0, radius=50)
+
+            #use the interconnect objects to create layout:
+            ic1.strt(length=10).put(0)
+            ic1.bend(angle=45).put()
+
+            ic2.strt(length=20).put(20)
+            ic2.bend(angle=45).put()
+
+            nd.export_plt()
     """
 
     def __init__(self, radius=None, width=None, angle=90, xs='nazca',
@@ -117,14 +145,37 @@ class Interconnect():
         self.length = 10 #length
         self.xs = xs
         self.layer = layer
-        self.instantiate=False
+        self.instantiate = False
+        self.xya = (100,100,10)
         self.line = nd.Tp_straight(xs=self.xs, layer=self.layer)
+        self.ccurve = nd.Tp_ccurve(xs=self.xs, layer=self.layer)
+        self.pcurve = nd.Tp_pcurve(xya=self.xya, Rin=0,
+                Rout=0, xs=self.xs, layer=self.layer)
         self.Farc = nd.Tp_arc(xs=self.xs, layer=self.layer)
         self.__ptaper = nd.Tp_ptaper(xs=self.xs, layer=self.layer)
         self.__taper = nd.Tp_taper(xs=self.xs, layer=self.layer)
         self.adapt_width = adapt_width
         self.adapt_xs = adapt_xs
         self.arrow = tdk.make_pincell()
+
+
+    def copy(self):
+        """Create a copy of the Interconnect object.
+
+        The copy is created by initializing a new Interconnect with __init__
+        using only the parameters send to init.
+
+        Return:
+            Interconnect: copy of self
+        """
+        return Interconnect(
+            radius=self.radius,
+            width=self.width,
+            angle=self.angle,
+            xs=self.xs,
+            layer=self.layer,
+            adapt_width=self.adapt_width,
+            adapt_xs=self.adapt_xs)
 
 
     def arc(self, radius=10, width=1.0, angle=90, xs=None,
@@ -240,6 +291,7 @@ class Interconnect():
             length = self.length
 
         with nd.Cell('strt_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
             self.line(length=length, width=width, xs=xs, edge1=edge1,
                 edge2=edge2, name=name).put(0)
@@ -247,6 +299,8 @@ class Interconnect():
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
 
         if pin is not None:
             cfg.cp = pin
@@ -254,7 +308,7 @@ class Interconnect():
 
 
     def bend(self, radius=None, angle=None, width=None, pin=None, xs=None,
-            name=None, arrow=True):
+            name=None, arrow=True, offset=None):
         """Create a bent waveguide (circular arc).
 
         Args:
@@ -287,12 +341,16 @@ class Interconnect():
             angle = self.angle
 
         with nd.Cell('bend_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-            self.arc(radius=radius, width=width, angle=angle, xs=xs, name=name).put(0)
+            self.arc(radius=radius, width=width, angle=angle, xs=xs, name=name,
+                offset=offset).put(0)
             nd.Pin('b0', width=width, xs=xs).put()
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
 
         if pin is not None:
             cfg.cp = pin
@@ -333,6 +391,7 @@ class Interconnect():
             length = self.length
 
         with nd.Cell('ptaper_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
             nd.Pin('a0', width=width1, xs=xs).put(0, 0, 180)
             self.__ptaper(length=length, width1=width1, width2=width2,
                 name=name, xs=xs).put(0)
@@ -340,6 +399,8 @@ class Interconnect():
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
 
         if pin is not None:
             cfg.cp = pin
@@ -380,6 +441,7 @@ class Interconnect():
             length = self.length
 
         with nd.Cell('taper_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
             nd.Pin('a0', width=width1, xs=xs).put(0, 0, 180)
             self.__taper(length=length, width1=width1, width2=width2,
                 name=name, xs=xs).put(0)
@@ -387,6 +449,8 @@ class Interconnect():
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
 
         if pin is not None:
             cfg.cp = pin
@@ -436,12 +500,16 @@ class Interconnect():
         if name is None:
             name = 'sw'
         with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0)
             self.line(length=length, width=width, xs=xs).put(ICcell.pin['a0'].rot(180+b))
             nd.Pin('b0', width=width, xs=xs).put()
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
+
         cfg.cp = pin1
         return ICcell
 
@@ -533,6 +601,7 @@ class Interconnect():
         if name is None:
             name = 'rot2ref'
         with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
             self.line(length=length1, width=width, xs=xs).put(0)
             self.arc(angle=a, radius=radius, width=width, xs=xs).put()
@@ -541,11 +610,15 @@ class Interconnect():
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
 
         if pin is not None:
             cfg.cp = pin
         return ICcell
 
+
+    #def sbend_solve()
 
     def sbend(self, radius=None, width=None, pin=None, xs=None, offset=20,
             Ltot=0, name=None, arrow=True):
@@ -555,7 +628,7 @@ class Interconnect():
             radius (float): bend radius at the center line of the arc in um
             width (float): width of the interconnect in um
             pin (Node): optional Node for modeling info
-            xs (str): xsection of taper
+            xs (str): xsection of sbend
             offset (float): lateral offset of the sbend in um
             Ltot (float): optional total forward length of the sbend in um
 
@@ -573,7 +646,6 @@ class Interconnect():
                 guide.put()
                 nd.export_plt()
         """
-
         #TODO: check Ltot and add 'length' var
         xs = self._getxs(pin, xs)
         width  = self._getwidth(pin, width, xs)
@@ -604,13 +676,64 @@ class Interconnect():
         if name is None:
             name = 'cw'
         with nd.Cell('name', instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-            s1 = self.line(La, width, xs=xs).put(0)
-            b1 = self.arc(radius, angle=-m.degrees(A), width=width, xs=xs).put()
-            s2 = self.line(L, width).put()
-            b2 = self.arc(radius, angle=m.degrees(A), width=width, xs=xs).put()
-            s3 = self.line(Lb, width, xs=xs).put()
+            self.line(La, width, xs=xs).put(0)
+            self.arc(radius, angle=-m.degrees(A), width=width, xs=xs).put()
+            self.line(L, width).put()
+            self.arc(radius, angle=m.degrees(A), width=width, xs=xs).put()
+            self.line(Lb, width, xs=xs).put()
             nd.Pin('b0', width=width, xs=xs).put()
+            if arrow:
+                self.arrow.put(ICcell.pin['a0'])
+                self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
+
+        if pin is not None:
+            cfg.cp = pin
+        return ICcell
+
+
+    def cbend(self, width=None, pin=None, xs=None, distance=200, offset=20,
+            name=None, arrow=True):
+        """Create a cosine-bend interconnect.
+
+        Args:
+            width (float): width of the interconnect in um
+            pin (Node): optional Node for modeling info
+            xs (str): xsection of cbend
+            distance (float): total forward length of the cbend in um
+            offset (float): lateral offset of the cbend in um
+
+        Returns:
+            Cell: cbend element
+
+        Example:
+            Create and place a cbend waveguide::
+
+                import nazca as nd
+                from nazca.interconnects import Interconnect
+                ic = Interconnect(width=2.0, radius=10.0)
+
+                guide = ic.cbend(distance=100, offset=50)
+                guide.put()
+                nd.export_plt()
+        """
+        xs = self._getxs(pin, xs)
+        width = self._getwidth(pin, width, xs)
+
+
+        with nd.Cell('cbend_{}_{}_{}'.format(xs,int(distance),int(offset)),
+                instantiate=self.instantiate, cnt=True) as ICcell:
+            nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
+            if abs(offset) < 1e-6:
+                # Straight line will do just fine.
+                self.strt(length=distance).put()
+            else:
+                self.ccurve(width=width, distance=distance, offset=offset,
+                        xs=xs).put()
+            nd.Pin('b0', width=width, xs=xs).put(distance, offset, 0)
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
@@ -618,6 +741,99 @@ class Interconnect():
         if pin is not None:
             cfg.cp = pin
         return ICcell
+
+
+    def sbend_p2p_solve(self, pin1, pin2, width=None, radius=None, xs=None,
+            length1=0, doStrFirst=1, internal=False):
+        """Calculate an sbend_p2p solution.
+
+        Returns:
+            solution parameters
+        """
+        if pin1 is None:
+            pin1 = cp.here()
+        if pin2 is None:
+            pin1, pin2 = cp.here(), pin1
+
+        pin1b, T = nd.parse_pin(pin1)
+        pin1 = pin1b.move(*T)
+        pin2b, T = nd.parse_pin(pin2, rot=True, default='out')
+        pin2 = pin2b.move(*T)
+
+        dx, dy, da = nd.diff(pin1, pin2)
+        xs = self._getxs(pin1, xs)
+        width  = self._getwidth(pin1, width, xs)
+        radius  = self._getradius(pin1, radius, xs)
+
+        message = ''
+        A = 0
+        Ltap = 0
+        Amax = m.radians(90)
+
+        if length1 < 0:
+            length1 = abs(length1)
+            doStrFirst = 0
+
+        # get dy from start and end position
+        if length1 < Ltap:
+            length1 = Ltap
+
+        if 2*radius*(1-m.cos(Amax))+2*Ltap*m.sin(Amax) > abs(dy):
+            #not enough offset for Amax--> no vertical straight guide
+            if Ltap == 0:
+                A = m.acos(1-abs(dy)/(2*radius))
+            else:
+                tel=0
+                A = 0
+                da=0.2
+                damin=1e-8
+                while abs(da) > damin and tel < 100:
+                    if Ltap*m.sin(A)-radius*m.cos(A) < (abs(dy)-2*radius)/2.0:
+                        A += da
+                    else:
+                        A -= da
+                        da /= 2.0
+                        A += da
+                    tel += 1
+                if A < 10*damin:
+                    A=0
+
+            A = sign(dy)*A
+            Lstr = 0
+        else: # use Amax angle
+            A = sign(dy)*Amax
+            Lstr = (abs(dy) - abs(2*radius*(1-m.cos(Amax))) -2*Ltap) # abs(m.sin(Amax))
+
+        Lfit = dx -2*radius*abs(m.sin(A)) - (Lstr+2*Ltap)*abs(m.cos(A)) - length1
+        La, Lb = 0, 0
+        if doStrFirst == 1:
+            La = length1-Ltap
+            Lb = Lfit-Ltap
+        else:
+            Lb = length1-Ltap
+            La = Lfit-Ltap
+
+        if La < 0 or Lb < 0:
+            message = "(interconnect): No solution for sbend_p2p."
+
+        else:
+            if A == 0:
+                Lstr += 4*Ltap
+
+        connect = pin1, pin2, xs, width, radius
+        params = {
+            'angle': A,
+            'length1': La,
+            'length2': Lstr,
+            'length3': Lb,
+            'Lfit': Lfit,
+            'message': message,
+            'Amax': Amax,
+            'Ltap': Ltap}
+        if internal:
+            return connect, params
+        else:
+            return params
 
 
     def sbend_p2p(self, pin1=None, pin2=None, width=None, radius=None, Amax=90,
@@ -650,92 +866,42 @@ class Interconnect():
                 guide.put()
                 nd.export_plt()
         """
-        if pin1 is None:
-            pin1 = cp.here()
-        if pin2 is None:
-            pin1, pin2 = cp.here(), pin1
 
-        pin1b, T = nd.parse_pin(pin1)
-        pin1 = pin1b.move(*T)
-        pin2b, T = nd.parse_pin(pin2, rot=True, default='out')
-        pin2 = pin2b.move(*T)
-
-        xs = self._getxs(pin1, xs)
-        width  = self._getwidth(pin1, width, xs)
-        radius  = self._getradius(pin1, radius, xs)
-
-        A = 0
-        Ls =0
-        Ltap = 0
-        Amax = m.radians(Amax)
-
-        dx, dy, da = nd.diff(pin1,  pin2)
-
-        if Lstart < 0:
-            Lstart = abs(Lstart)
-            doStrFirst = 0
-
-        # get dy from start and end position
-        if Lstart < Ltap:
-            Lstart = Ltap
-
-        if 2*radius*(1-m.cos(Amax))+2*Ltap*m.sin(Amax) > abs(dy):
-            #not enough offset for Amax--> no vertical straight guide
-            if Ltap == 0:
-                A = m.acos(1-abs(dy)/(2*radius))
-            else:
-                tel=0
-                A = 0
-                da=0.2
-                damin=1e-8
-                while abs(da) > damin and tel < 100:
-                    if Ltap*m.sin(A)-radius*m.cos(A) < (abs(dy)-2*radius)/2.0:
-                        A += da
-                    else:
-                        A -= da
-                        da /= 2.0
-                        A += da
-                    tel += 1
-                if A < 10*damin:
-                    A=0
-
-            A = sign(dy)*A
-            Lstr = 0
-        else: # use Amax angle
-            A = sign(dy)*Amax
-            Lstr = (abs(dy) - abs(2*radius*(1-m.cos(Amax))) -2*Ltap) # abs(m.sin(Amax))
-
-        Lfit = dx -2*radius*abs(m.sin(A)) - (Lstr+2*Ltap)*abs(m.cos(A)) - Lstart
-        La, Lb = 0, 0
-        if doStrFirst == 1:
-            La = Lstart-Ltap
-            Lb = Lfit-Ltap
-        else:
-            Lb = Lstart-Ltap
-            La = Lfit-Ltap
+        connect, params = self.sbend_p2p_solve(pin1=pin1, pin2=pin2, width=width,
+            radius=radius, length1=Lstart, doStrFirst=doStrFirst, internal=True)
+        A    = params['angle']
+        La   = params['length1']
+        Lstr = params['length2']
+        Lb   = params['length3']
+        Lfit = params['Lfit']
+        Ltap = params['Ltap']
+        pin1, pin2, xs, width, radius = connect
 
         if La < 0 or Lb < 0:
             print("(interconnect): No solution for sbend_p2p.")
-            return self.strt_p2p(pin1, pin2)
+            return self.strt_p2p(pin1, pin2, xs='error')
 
         else:
             if A == 0:
                 Lstr += 4*Ltap
-
             if Lfit >= 0:
                 if name is None:
                     name = 'sbend_p2p'
                 with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
+                    trace.trace_start()
                     nd.Pin('a0', width=width, xs=xs).put((0, 0, 180))
-                    s1 = self.line(La, width, xs=xs).put()
-                    b1 = self.arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
-                    s2 = self.line(Lstr, width, xs=xs).put()
-                    b2 = self.arc(radius=radius, angle=-m.degrees(A)*sign(dx), width=width, xs=xs).put()
-                    s3 = self.line(Lb, width, xs=xs).put()
+                    self.line(La, width, xs=xs).put()
+                    self.arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
+                    self.line(Lstr, width, xs=xs).put()
+                    self.arc(radius=radius, angle=-m.degrees(A), width=width, xs=xs).put()
+                    self.line(Lb, width, xs=xs).put()
                     nd.Pin('b0', width=width, xs=xs).put()
                     if arrow:
                         self.arrow.put(ICcell.pin['a0'])
                         self.arrow.put(ICcell.pin['b0'])
+                    trace.trace_stop()
+                    ICcell.length_geo = trace.trace_length()
+
                 #nd.connect(pin2, ICcell)
                 cfg.cp = pin1
                 return ICcell
@@ -744,11 +910,11 @@ class Interconnect():
                 if name is None:
                     name = 'sbend'
                 if doStrFirst == 0:
-                    with nd.Cell("{}_{}".format(name, cnt), instantiate=self.instantiate) as ICcell:
+                    with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
                         nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-                        s1 = self.line(La, width, xs=xs).put()
-                        b1 = self.arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
-                        out = nd.Pin('b0', width=width, xs=xs).put()
+                        self.line(La, width, xs=xs).put()
+                        self.arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
+                        nd.Pin('b0', width=width, xs=xs).put()
                         if arrow:
                             self.arrow.put(ICcell.pin['a0'])
                             self.arrow.put(ICcell.pin['b0'])
@@ -758,10 +924,10 @@ class Interconnect():
                     return ICcell
 
                 else:
-                    with nd.Cell("{}_{}".format(name, cnt), instantiate=self.instantiate) as ICcell:
+                    with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
                         nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-                        s1 = self.line(Lb, width, xs=xs).put()
-                        b1 = self.arc(radius=radius, angle=m.degrees(-A), width=width, xs=xs).put()
+                        self.line(Lb, width, xs=xs).put()
+                        self.arc(radius=radius, angle=m.degrees(-A), width=width, xs=xs).put()
                         nd.Pin('b0', width=width, xs=xs).put()
                         if arrow:
                             self.arrow.put(ICcell.pin['a0'])
@@ -787,6 +953,8 @@ class Interconnect():
         B =  pin2.move(-Ltap, 0, 180)
         dx, dy, da = nd.diff(A, B)
 
+        radius1 -= 1e-8
+        radius2 -= 1e-8
         # Calculate circle centers. Note that pin1 is conceptually put at (0,0,0)
         c1Lx, c1Ly = 0, radius1
         c1Rx, c1Ry = 0, -radius1
@@ -820,10 +988,11 @@ class Interconnect():
                 sx, sy = c2Lx-c1Lx, c2Ly-c1Ly
                 d1, d2 = -1, 1
 
+
             rr = d1*radius1 + d2*radius2
-            s = m.sqrt(sx**2+sy**2)  # (sx,sy): (x,y)-distannce between circle centers
-            if rr > s:
-                print("WARNING (module interconnects): Radii to large.")
+            s = m.sqrt(sx**2+sy**2)  # (sx,sy): (x,y)-distance between circle centers
+            if rr > s+1e-6:
+                print("WARNING (Interconnects.bend_strt_bend): Radii too large.")
                 found = False
                 return {} #found, 0, 0, 0, 0
             else:
@@ -839,14 +1008,14 @@ class Interconnect():
                 t1 = m.radians(0)+gt # angle of spoke that points to start-point bsb on the circle
                 t2 = m.radians(da)+gt # angle of spoke that points to end-point bsb on the circle
                 if d1 == 1:
-                    b = NegRad(-t1) # angle of drawn self.arc on start self.arc
+                    b = negRad(-t1) # angle of drawn self.arc on start self.arc
                 else:
-                    b = PosRad(-t1) # angle of drawn self.arc on start self.arc
+                    b = posRad(-t1) # angle of drawn self.arc on start self.arc
 
                 if d2 == -1:
-                    e = NegRad(t2) # angle of drawn self.arc on end self.arc
+                    e = negRad(t2) # angle of drawn self.arc on end self.arc
                 else:
-                    e = PosRad(t2) # angle of drawn self.arc on start self.arc
+                    e = posRad(t2) # angle of drawn self.arc on start self.arc
 
 
                 L = s*m.cos(gb) # length of straight self.line
@@ -883,7 +1052,7 @@ class Interconnect():
             return {ictype: solutions[ictype]}
 
         else:
-            exit('Something wrong, no solution found.')
+            exit('WARNING (Interconnects.bend_strt_bend): No solution found.')
 
 
     def bend_strt_bend_p2p(self, pin1=None, pin2=None, radius=None, radius1=None, radius2=None,
@@ -947,28 +1116,36 @@ class Interconnect():
                 name = 'bend_strt_bend'
             with nd.Cell("{}_{}".format(name, shape),
                     instantiate=instantiate, cnt=True) as ICcell:
+                trace.trace_start()
                 nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-                b1 = self.arc(radius1, angle=m.degrees(b), width=width, xs=xs).put()
-                s1 = self.line(L, width, xs=xs).put()
-                b2 = self.arc(radius2, angle=m.degrees(e), width=width, xs=xs).put()
+                self.arc(radius1, angle=m.degrees(b), width=width, xs=xs).put()
+                self.line(L, width, xs=xs).put()
+                self.arc(radius2, angle=m.degrees(e), width=width, xs=xs).put()
                 nd.Pin('b0', width=width, xs=xs).put()
                 if arrow:
                     self.arrow.put(ICcell.pin['a0'])
                     self.arrow.put(ICcell.pin['b0'])
+                trace.trace_stop()
+                ICcell.length_geo = trace.trace_length()
+
             #nd.connect(pin2, ICcell)
             cfg.cp = pin1
             cells.append(ICcell)
 
         if not cells:
             print("(interconnect): No solution for bend_strt_bend_p2p.")
-            return self.strt_p2p(pin1, pin2)
+            return self.strt_p2p(pin1, pin2, xs='error')
         elif len(cells) == 1:
             return cells[0]
         else:
             with nd.Cell(name, cnt=True) as ICgroup:
+                trace.trace_start()
                 p = nd.Pin('a0', width=width, xs=xs).put(0)
                 for cell in cells:
                     cell.put(p.rot(180))
+                trace.trace_stop()
+                ICgroup.length_geo = trace.trace_length()
+
             #nd.connect(pin2, ICcell)
             cfg.cp = pin1
             return ICgroup
@@ -1082,14 +1259,18 @@ class Interconnect():
             if name is None:
                 name = 'scs'
             with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
+                trace.trace_start()
                 nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-                s1 = self.line(L1, width, xs=xs).put()
-                b1 = self.arc(radius, angle=da, width=width, xs=xs).put()
-                s2 = self.line(L2, width, xs=xs).put()
+                self.line(L1, width, xs=xs).put()
+                self.arc(radius, angle=da, width=width, xs=xs).put()
+                self.line(L2, width, xs=xs).put()
                 nd.Pin('b0', width=width, xs=xs).put()
                 if arrow:
-                    self.arrow.put(ICcell.pin['a0'])
                     self.arrow.put(ICcell.pin['b0'])
+                    self.arrow.put(ICcell.pin['a0'])
+                trace.trace_stop()
+                ICcell.length_geo = trace.trace_length()
+
             #nd.connect(pin2, ICcell)
             cfg.cp = pin1
             return ICcell
@@ -1100,12 +1281,19 @@ class Interconnect():
         # goto bend_strt_bend:
         print(message)
         return self.bend_strt_bend_p2p(pin1, pin2, radius1=radius,
-            radius2=radius, width=width, xs=xs, name=name)
+            radius2=radius, width=width, xs=xs, arrow=arrow, name=name)
 
 
     def ubend_p2p(self, pin1=None, pin2=None, radius=None, width=None, xs=None,
-                  length=0, name=None, arrow=True):
+                  length=0, name=None, arrow=True, balance=0, end_angle=False):
         """Create point-to-point u-bend interconnect.
+
+        An extra straight length can be added to the ubend with <length>.
+        If the sideways translation needed in the ubend is <2*radius, then
+        the ubend automatically introduces a 'horseshoe' shape. The horseshoe
+        can be made sidelobed by a <balance> parameter between -1 and 1, where
+        0 results in a symmetric shape.
+        The orientation of the output pin does not matter
 
         Args:
             pin1 (Node | Instance): start pin (default = cp)
@@ -1114,6 +1302,8 @@ class Interconnect():
             width (float): optional waveguide width in um
             xs (str): optional xsection of ubend
             length (float): extra straight section for longer ubend (default = 0)
+            balance (float): for a ubend <2*radius sidewyas, shift the horseshoe shape (default = 0)
+            end_angle (bool): Take pin2 angle into account when connecting if True (default = False)
 
         Returns:
             Cell: ubend element
@@ -1129,8 +1319,7 @@ class Interconnect():
                 guide.put()
                 nd.export_plt()
         """
-        # draw a 180 degree u-shape connection
-        # orientation of the output pin does not matter.
+
         if pin1 is None:
             pin1 = cp.here()
         if pin2 is None:
@@ -1145,25 +1334,129 @@ class Interconnect():
         width  = self._getwidth(pin1, width, xs)
         radius  = self._getradius(pin1, radius, xs)
 
-        dx, dy, da = nd.diff(pin1, pin2)
-        if dx < 0:
-            L2 = length-dx
-            L1 = length
-        else:
-            L1 = length+dx
-            L2 = length
+        def diff(pin1, pin2):
+            dx, dy, da = nd.diff(pin1, pin2)
+            if not end_angle:
+                da = 0
+            if dx < 0:
+                L2 = length-dx
+                L1 = length
+            else:
+                L1 = length+dx
+                L2 = length
+
+            if abs(dy) < 2*radius:
+                d = -np.sign(dy)*(1e-6+radius - 0.5*abs(dy))
+                d1 = d*(1+balance)
+                d2 = d*(1-balance)
+            else:
+                d1, d2 = 0, 0
+            return  L1, L2, dx, dy, da, d1, d2
+
+        L1, L2, dx, dy, da, d1, d2 = diff(pin1, pin2)
+
         if name is None:
             name = 'scs'
+
         with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
-            nd.Pin('a0', width=width, xs=xs).put((0, 0, 180))
-            s1 = self.line(L1, width, xs=xs).put(ICcell.pin['a0'].rot(180))
-            s2 = self.line(L2, width, xs=xs).put(ICcell.pin['a0'].move(-dx, -dy, 180))
-            b1 = self.bend_strt_bend_p2p(s1.pin['b0'].rot(0), s2.pin['b0'].rot(0),
-                radius1=radius, radius2=radius, width=width, xs=xs, arrow=False).put()
+            trace.trace_start()
+            nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
+            p1 = nd.Pin().put(ICcell.pin['a0'].rot(180))
+            p2 = ICcell.pin['a0'].move(-dx, -dy, 180+da)
+            nd.Pin('b0', width=width, xs=xs).put(p2.rot(180))
+
+            if abs(da) > 1e-10:
+                da2 = zeroDeg(da)
+                print(da, da2)
+                b = self.bend(angle=-da2, radius=radius, width=width, xs=xs,
+                    arrow=False).put(p2)
+                p2 = b.pin['b0']
+                L1, L2, dx, dy, da, d1, d2 = diff(p1, b.pin['b0'])
+                print('in:', L1, L2, dx, dy, da, d1, d2)
+
+            nd.cp.goto_pin(p1)
+            if abs(d1) > 1e-6:
+                 self.sbend(offset=d1, radius=radius, width=width, xs=xs,
+                     arrow=False).put()
+            s1 = self.line(L1, width, xs=xs).put()
+
+            self.line(0).put(p2)
+            if abs(d2) > 1e-6:
+                self.sbend(offset=-d2, radius=radius, width=width, xs=xs,
+                    arrow=False).put()
+            s2 = self.line(L2, width, xs=xs).put()
+
+            self.strt_bend_strt_p2p(s1.pin['b0'], s2.pin['b0'],
+                radius=radius, width=width, xs=xs, arrow=False).put()
+            if arrow:
+                self.arrow.put(ICcell.pin['a0'])
+                self.arrow.put(ICcell.pin['b0'])
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
+
+        cfg.cp = pin1
+        return ICcell
+
+    def pcurve_p2p(self, pin1=None, pin2=None, width=None, Rin=0, Rout=0,
+            Oin=None, Oout=None, xs=None, name=None, arrow=True):
+        """Create point-to-point pcurve interconnect.
+
+        Args:
+            pin1 (Node | Instance): start pin (default = cp)
+            pin2 (Node | Instance): end pin
+            width (float): optional waveguide width in um
+            xs (str): optional xsection
+
+        Returns:
+            Cell: pcurve interconnect element
+
+        Example:
+            Create and place a pcurve waveguide to connect two specific points::
+
+                import nazca as nd
+                from nazca.interconnects import Interconnect
+                ic = Interconnect(width=2.0, radius=10.0)
+
+                guide = ic.pcurve_p2p(pin1=(0, 0, 0), pin2=(40, 20, 90))
+                guide.put()
+                nd.export_plt()
+        """
+        # For the calculation always rotate coordinate system to point start
+        # coordinate in positive x-axis.
+        if pin1 is None:
+            pin1 = cp.here()
+        if pin2 is None:
+            pin1, pin2 = cp.here(), pin1
+
+        pin1b, T = nd.parse_pin(pin1)
+        pin1 = pin1b.move(*T)
+        pin2b, T = nd.parse_pin(pin2, rot=True, default='out')
+        pin2 = pin2b.move(*T)
+
+        dx, dy, da = nd.diff(pin1, pin2.rotate(180))
+        xya = (dx, dy, da)
+
+        xs = self._getxs(pin1, xs)
+        width  = self._getwidth(pin1, width, xs)
+
+        xs = self._getxs(pin1, xs)
+        width  = self._getwidth(pin1, width, xs)
+
+        with nd.Cell('pcurve_{}_{}_{}_{}'.format(xs,int(dx),int(dy),int(da)),
+                instantiate=self.instantiate, cnt=True) as ICcell:
+            nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
+            if abs(dy) < 1e-6 and abs(da) < 1e-6 and \
+                    abs(Rin) < 1e-6 and abs(Rout) < 1e-6:
+                # Straight line will do just fine.
+                self.strt(length=dx).put(0,0,0)
+            else:
+                self.pcurve(xya, width=width, Rin=Rin, Rout=Rout,
+                        Oin=Oin, Oout=Oout, xs=xs).put()
             nd.Pin('b0', width=width, xs=xs).put()
             if arrow:
                 self.arrow.put(ICcell.pin['a0'])
                 self.arrow.put(ICcell.pin['b0'])
+
         cfg.cp = pin1
         return ICcell
 

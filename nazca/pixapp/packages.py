@@ -148,7 +148,11 @@ class Package1():
         self.fiberareaR = fiberareaR
         self.textlayer = textlayer
 
-        self.DCpadcell = DCpadcell
+        if DCpadcell is None:
+            self.DCpadcell = sp.pad_dc_lw(width=70,length=90)
+        else:
+            self.DCpadcell = DCpadcell
+
         self.RFpadcell = RFpadcell
 
         if self.textlayer is None:
@@ -185,8 +189,8 @@ class Package1():
         with nd.Cell(name='{}_{}'.format(self.name, next(self.instnum))) as C:
 
             # Number of DC pads
-            nNS = int((l-2*self.DCminside)/self.DCpitch)
-            nEW = int((h-2*self.DCminside)/self.DCpitch)
+            nNS = int((l-2*self.DCminside)/self.DCpitch) + 1
+            nEW = int((h-2*self.DCminside)/self.DCpitch) + 1
             nDC = [nNS, nNS, nEW, nEW]
 
             # tuple in pins: start position of dc pins on all four sides.
@@ -312,8 +316,8 @@ class Package1():
         cfg.cp = pin
         pnpos = pin.name.find('_dc')
         padname = pin.name[pnpos+1:pnpos+7]
-        with nd.Cell('DC-pad-'+padname) as C:
-            pad = sp.pad_dc_lw(width=70,length=90).put('rc')
+        with nd.Cell('DC-pad-'+padname, instantiate=False) as C:
+            pad = self.DCpadcell.put('rc')
             pad.raise_pins()
             C.default_pins('rc', 'c0')
             txt = '{}\n{}'.format(padname[0:3], padname[3:])

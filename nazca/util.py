@@ -17,9 +17,9 @@
 #
 # Utility routines
 #
-# (c) 2016-2017  Xaveer Leijtens, Ronald Broeke
+# (c) 2016-2018  Xaveer Leijtens, Ronald Broeke
 #
-from math import hypot
+from math import hypot, sqrt
 from collections import OrderedDict
 from . import gds_base as gbase
 from .netlist import Cell
@@ -28,16 +28,25 @@ import os
 import numpy as np
 import hashlib
 from nazca.netlist import Polygon
+from math import radians, cos, sin
+
 
 __all__ = ['parameters_to_string', 'string_to_parameters',
         'get_cell_annotation', 'get_cell_polyline', 'get_cell_polygon',
-        'md5', 'isnotebook', 'image']
+        'make_iter', 'md5', 'isnotebook', 'image']
 
 
 def parameters_to_string(param):
     """Create a string from a parameter dictionary.
 
     param (dict): (parameter_name, value)
+
+    Format:
+
+    "Parameters:
+    <parameter> = <value>
+    <parameter> = <value>
+    ..."
 
     Returns:
         str: parameters as a string
@@ -49,14 +58,23 @@ def parameters_to_string(param):
 
 
 def string_to_parameters(string):
-    """Convert a string to a parameter dictionaty.
+    """Convert a string to a parameter dictionary.
+
+    The returned parameter values are represented as type str.
+
+    Format:
+
+    "Parameters:
+    <parameter> = <value>
+    <parameter> = <value>
+    ..."
 
     Returns:
-        ordered dict: <parameter_name: parameter_value>
+        ordered dict: {<parameter_name>: <parameter_value>}
     """
     lines = string.split('\n')
     p = OrderedDict()
-    if (lines[0] == 'Parameters:'):
+    if (lines[0].lower() == 'parameters:'):
         for line in lines[1:]:
             param = line.split('=', 1)
             if len(param) == 2:
@@ -67,22 +85,21 @@ def string_to_parameters(string):
 def get_cell_annotation(cell, convert=False):
     """Yield the <cell>'s annotations one by one.
 
-    If not convert then return XY as integers, as in GDSII file (nm).
-    If convert then return XY as floats (um).
+    If convert is False then return XY as integers, as in GDSII file (nm).
+    If convert is True then return XY as floats (um).
 
     cell (str): GDS cell name
     convert (bool): default convert=False
 
     Yields:
-        int, tuple(int|float, int|float), str:
-            annotation layer, position, text
+        int, (int, int) | (float, float): annotation layer, position, text
     """
     if convert:
         conv = gbase.gds_db_user
     else:
         conv = 1
     for e in cell.elements:
-        if e.etype == gbase.gds_record.TEXT:
+        if e.etype == gbase.GDS_record.TEXT:
             lay, pos, text = e.annotation
             pos[0] *= conv
             pos[1] *= conv
@@ -92,45 +109,46 @@ def get_cell_annotation(cell, convert=False):
 def get_cell_polyline(cell, convert=False):
     """Yield the <cell>'s polylines one by one.
 
-    If not convert then return XY as integers, as in GDSII file (nm).
-    If convert then return XY as floats (um).
+    If convert is False then return XY as integers, as in GDSII file (nm).
+    If convert is True then return XY as floats (um).
 
     cell (str): GDS cell name
-    convert (bool): default convert=False
+    convert (bool):  convert polyline's values to float (default = False)
 
     Yields:
-        int, tuple(int, int) or (float, float): layer, XY
+        int, (int, int) | (float, float): layer, XY
     """
     if convert:
         conv = gbase.gds_db_user
     else:
         conv = 1
     for e in cell.elements:
-        if e.etype == gbase.gds_record.PATH:
+        if e.etype == gbase.GDS_record.PATH:
             lay, points = e.polyline
             XY = []
             for i in range(0, len(points), 2):
                 XY.append((points[i] * conv, points[i+1] * conv))
             yield lay, XY
 
-def get_cell_polygon(cell, convert=False):
-    """Yield the <cell>'s polygones one by one.
 
-    If not convert then return XY as integers, as in GDSII file (nm).
-    If convert then return XY as floats (um).
+def get_cell_polygon(cell, convert=False):
+    """Yield the <cell>'s polygons one by one.
+
+    If convert is False then return XY as integers, as in GDSII file (nm).
+    If convert is True then return XY as floats (um).
 
     cell (str): GDS cell name
-    convert (bool): default convert=False
+    convert (bool): convert polygon's values to float (default = False)
 
     Yields:
-        int, tuple(int, int) or (float, float): layer, XY
+        int, (int, int) | (float, float): layer, XY
     """
     if convert:
         conv = gbase.gds_db_user
     else:
         conv = 1
     for e in cell.elements:
-        if e.etype == gbase.gds_record.BOUNDARY:
+        if e.etype == gbase.GDS_record.BOUNDARY:
             lay, points = e.polygon
             XY = []
             for i in range(0, len(points), 2):
@@ -138,16 +156,28 @@ def get_cell_polygon(cell, convert=False):
             yield lay, XY
 
 
-def md5(s, N=5):
-    """Return first N characters of md5 hash of string s."""
-    return hashlib.md5(s.encode()).hexdigest()[:N]
+def make_iter(x):
+    """Return x as tuple, if x is not a string and not iterable."""
+    if x is None:
+        return tuple()
+    elif type(x) is str or not hasattr(x, "__iter__"):
+        return x,
+    else:
+        return x
+
+
+def md5(x, N=5):
+    """Return first N characters of md5 hash of argument x.
+    It hashes the (default) string representation of the object.
+    """
+    return hashlib.md5('{}'.format(x).encode()).hexdigest()[:N]
 
 
 def isnotebook():
     """Check if code is run in a Jupyter notebook.
 
     Returns:
-        bool: wether call is made from a notebook (True)
+        bool: True if call is made from a notebook
     """
     try:
         shell = get_ipython().__class__.__name__
@@ -160,9 +190,10 @@ def isnotebook():
     except NameError:
         return False      # Probably standard Python interpreter
 
+
 def PIL2array(img):
-    return np.array(img.getdata(),
-            np.bool).reshape(img.size[1], img.size[0])
+    return np.array(img.getdata(), np.bool).reshape(img.size[1], img.size[0])
+
 
 def image(name, layer=1, size=256, pixelsize=1, threshold=0.5,
         cellname=None, invert=False, align='cc', box_layer=None, box_buf=0):
@@ -204,7 +235,12 @@ def image(name, layer=1, size=256, pixelsize=1, threshold=0.5,
 
             logo = nd.image('mylogo.png', align='lb') # left/bottom alignment
             logo.put(0)
-            # or
+            nd.export_gds()
+
+        or::
+
+            import nazca as nd
+
             nd.export_gds(logo, filename='mylogo.gds')
     """
     if cellname is None:
@@ -272,7 +308,7 @@ def klayout2nazca(string):
         string (str): string with points to convert
 
     Returns:
-        list of points (x,y)
+        list of (float, float): list of points (x,y)
 
     Example::
 
@@ -283,18 +319,20 @@ def klayout2nazca(string):
     return [[float(x) for x in line.split('\t')]
         for line in string.strip().split('\n')]
 
+
 def pointdxdy(xy, i, w):
     """Helper function to return the left and right point to the starting
-    point of a line segment from (x1, y1) to (x2, y2) with width w. The
-    line may contain many points, but only the first two are used.
+    point of a line segment from (x1, y1) to (x2, y2) with width w.
+
+    The line may contain many points, but only the first two are used.
 
     Args:
-        xy: list of points (x,y)
+        xy (list of (float, float)): list of points (x,y)
         i (int): index of point in list
         w (float): width of line segment
 
     Returns:
-        point (dx, dy)
+        (float, float): point (dx, dy)
     """
     dx = xy[i+1][1] - xy[i+0][1]
     dy = xy[i+0][0] - xy[i+1][0]
@@ -309,13 +347,12 @@ def corner(xy, i, dxy):
     segment with a given distance in x and y.
 
     Args:
-        xy: list of points (x,y)
+        xy (float, float): list of points (x,y)
         i (int): index of point in list
-        dxy: point (dx, dy)
+        dxy (float, float): point (dx, dy)
 
     Returns:
-        tuple of 4 points (x,y) which are the corner points of the line
-        segment.
+        tuple of 4 points (x,y): corner points of the line segment
     """
     return ((xy[i][0]   + dxy[0], xy[i][1]   + dxy[1]),
             (xy[i][0]   - dxy[0], xy[i][1]   - dxy[1]),
@@ -328,7 +365,9 @@ def corner(xy, i, dxy):
 # Fails for parallel lines (divide by zero), but the algorithm below
 # ensures this is not the case.
 def intersect(xy0, xy1, xy2, xy3): # four points
-    """Helper function to intersect two lines. Intersection point (xi, yi)
+    """Helper function to intersect two lines.
+
+    Intersection point (xi, yi)
     of two lines that go through (x0, y0), (x1, y1) and (x2, y2), (x3, y3).
     Fails for parallel lines (divide by zero), but the algorithm in
     polyline2polygon ensures this is not the case.
@@ -337,7 +376,7 @@ def intersect(xy0, xy1, xy2, xy3): # four points
         list of four points (x,y)
 
     Returns:
-        intersection point (xi,yi)
+        (float, float): intersection point (xi,yi)
     """
     x0, y0 = xy0
     x1, y1 = xy1
@@ -345,14 +384,33 @@ def intersect(xy0, xy1, xy2, xy3): # four points
     x3, y3 = xy3
     D  = (x3-x2)*(y1-y0)-(x1-x0)*(y3-y2)
     Dx = (x3-x2)*(y2-y0)-(x2-x0)*(y3-y2)
+    if abs(D) < 1e-16: # Don't divide, just return the point "in between".
+        return ((x0+x1+x2+x3)/4, (y0+y1+y2+y3)/4)
     xi = x0 + Dx/D * (x1-x0)
     yi = y0 + Dx/D * (y1-y0)
     return (xi, yi)
 
 
-def polyline2polygon(xy, w):
+def polyline_length(xy):
+    """Return the lenght of the polyline, which is the sum of the line
+    segments in the polyline.
+
+    Args:
+        xy (list): list of (x,y) points that hold the polygon.
+
+    Returns:
+        length (float): the length of the polyline.
+    """
+    length = 0
+    for i in range(1, len(xy)):
+        length += sqrt((xy[i][0]-xy[i-1][0])**2+(xy[i][1]-xy[i-1][1])**2)
+    return length
+
+
+def polyline2polygon(xy, width=2, miter=0.5):
     """Return a polygon that contains the outline points of a polyline with
     given width.
+
     Since we have to specify the outline of two or more segments that make
     an angle, we have to know what to do with the gap between those
     segments at the outside of the corner. In order to determine which
@@ -367,22 +425,23 @@ def polyline2polygon(xy, w):
 
     Args:
         xy (list): list of (x,y) points that hold the polygon
-        w (float): width of the polyline
+        width (float): width of the polyline (default 2)
+        miter (float): maximum fraction of the width before an extra point
+            is added in outside corners (default 0.5)
 
     Returns:
-        the polygon
+        list of (float, float): the polygon
     """
 
     # the fraction of the width of the line segments that is used to
     # determine if a single point is sufficient to describe the outline, or
     # that two points are needed (miter limit).
-    fracwidth = 0.5
-    dsqrmax = (fracwidth * w)**2
+    dsqrmax = (miter * width)**2
     n = len(xy)
     if n < 2:
         raise ValueError("Polyline2polygon: need at least 2 points for polyline.")
     # Start with the first two points
-    dxy1 = pointdxdy(xy, 0, w)
+    dxy1 = pointdxdy(xy, 0, width)
     cxy1 = corner(xy, 0, dxy1)
     xy_start = [cxy1[0]]
     xy_end = [cxy1[1]]
@@ -391,7 +450,7 @@ def polyline2polygon(xy, w):
         # Shift corner points from next to current segment.
         cxy0 = cxy1
         # Get corner points for next segment.
-        dxy1 = pointdxdy(xy, i, w)
+        dxy1 = pointdxdy(xy, i, width)
         cxy1 = corner(xy, i, dxy1)
         # left or right turn
         lrt = (xy[i+1][1]-xy[i-1][1]) * (xy[i][0]-xy[i-1][0]) -\
@@ -424,3 +483,40 @@ def polyline2polygon(xy, w):
     xy_start.append(cxy1[2])
     xy_end.append(cxy1[3])
     return xy_start + list(reversed(xy_end))
+
+
+def transform_polygon(points, dx=0.0, dy=0.0, da=0.0, scale=1.0,
+        flipx=False, flipy=False, x=0.0, y=0.0):
+    """Transform a polygon by translation, rotation, scaling and/or flipping.
+
+    The transformation first applies (dx, dy) to reposition the origin.
+    Subsequently, the scale, rotate and flips are applied, where order does not matter.
+    Finally, a (x, y) translation is performed.
+
+    Args:
+        polygon (list of (float, float)): points (x, y)
+        dx (float): x translation in um (default = 0.0)
+        dy (float): y translation in um (default = 0.0)
+        da (float): a translation in deg (default = 0.0)
+        scale (float): scaling factor (default = 1.0)
+        flipx (bool): flip x coordinate x -> -x (default = False)
+        flipy (bool): flip y coordinate y -> -y (default = False)
+        x (float): final x translation (after other transformations)
+        y (float): final y translation (after other transformations)
+
+    Returns:
+        (list of (float, float)): transformed polygon points
+    """
+    fu,fv = 1, 1
+    if flipx:
+        fu = -1
+    if flipy:
+        fv = -1
+    a = radians(da)
+    xy = []
+    for u, v in points:
+        u = (u+dx)*fu
+        v = (v+dy)*fv
+        xy.append( ( x + scale*(cos(a)*u - sin(a)*v),
+                     y + scale*(sin(a)*u + cos(a)*v) ))
+    return xy

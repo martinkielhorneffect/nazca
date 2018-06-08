@@ -51,8 +51,8 @@ def Tp_RFlineGSG(length=100, width_sig=10, width_gnd=10, gap=10, wext_bg=None,
             #bb_width = width_sig + 2*width_gnd + 2*gap
             width = width_sig
             sig = nd.strt(length=length, width=width, xs=xs['a0']).put(0)
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0']).put(sig.pin['a0'])
-            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0']).put(sig.pin['b0'])
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='electrical').put(sig.pin['a0'])
+            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='electrical').put(sig.pin['b0'])
 
             pdk.put_stub(['a0', 'b0'])
             #pdk.put_boundingbox('org', length, bb_width)
@@ -93,8 +93,8 @@ def Tp_RFbendGSG(radius=50, angle=30, width_sig=10, width_gnd=10, gap=10, wext_b
 
             width = width_sig
             Sig = nd.bend(radius=radius, angle=angle, width=width, xs=xs['a0']).put(0)
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0']).put(Sig.pin['a0'])
-            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0']).put(Sig.pin['b0'])
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='electrical').put(Sig.pin['a0'])
+            nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='electrical').put(Sig.pin['b0'])
 
             #pdk.put_boundingbox('org', length, width)
             pdk.put_stub(['a0', 'b0'])
@@ -155,7 +155,7 @@ def Tp_RFpadGSG(width_sig=10, width_gnd1=10, width_gnd2=None,
             C.default_pins('a0', 'a0')
             pdk.addBBmap(name)
 
-            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0']).put(0, 0, 180)
+            nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='electrical').put(0, 0, 180)
             #nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0']).put(0, 0, 180)
 
             bb_length = length_pad+height_tap
@@ -176,7 +176,7 @@ def Tp_RFpadGSG(width_sig=10, width_gnd1=10, width_gnd2=None,
             # outline of the BB
             angle = -degrees(atan(height_tap/(0.5*(widthRectangle-widthTaper))))
             outline = geom.trapezoid(length=widthTaper, height=height_tap,
-                angle1=angle, angle2=angle, position='4')
+                angle1=angle, angle2=angle, position=4)
             nd.Polygon(layer='bbox', points=outline).put(0, 0, -90)
 
             outline = geom.box(length=heightRectangle, width=widthRectangle)
@@ -184,11 +184,12 @@ def Tp_RFpadGSG(width_sig=10, width_gnd1=10, width_gnd2=None,
 
             # Ground Taper
             outline = geom.tetragon(length=width_gnd1, height=height_tap,
-                dx=gap2-gap1, x=width_pad_gnd, position='4')
+                dx=gap2-gap1, x=width_pad_gnd, position=4)
             nd.Polygon(layer=layer, points=outline).\
                 put(0, gap1+0.5*(width_sig+width_gnd1), -90)
             # Ground Pad
-            outline = geom.rectangle(length=width_pad_gnd, height=length_pad, position='7')
+            outline = geom.rectangle(length=width_pad_gnd,
+                    height=length_pad, position=7)
             nd.Polygon(layer=layer, points=outline).\
                 put(height_tap, gap2+0.5*width_sig, -90)
 
@@ -196,16 +197,18 @@ def Tp_RFpadGSG(width_sig=10, width_gnd1=10, width_gnd2=None,
             outline = geom.box(length=height_tap, width=width_sig)
             nd.Polygon(layer=layer, points=outline).put(0, 0, 0)
             # Signal Pad
-            outline = geom.rectangle(length=width_pad_sig, height=length_pad, position='4')
+            outline = geom.rectangle(length=width_pad_sig,
+                    height=length_pad, position=4)
             nd.Polygon(layer=layer, points=outline).put(height_tap, 0, -90)
 
             # Ground Taper
             outline = geom.tetragon(length=width_gnd2, height=height_tap,
-                dx=-gap2-width_pad_gnd+gap1+width_gnd2, x=width_pad_gnd, position='4')
+                dx=-gap2-width_pad_gnd+gap1+width_gnd2, x=width_pad_gnd,
+                position=4)
             nd.Polygon(layer=layer, points=outline).\
                 put(0, -gap1-0.5*(width_sig+width_gnd2), -90)
             # Ground Pad
-            outline = geom.rectangle(length=width_pad_gnd, height=length_pad, position='1')
+            outline = geom.rectangle(length=width_pad_gnd, height=length_pad, position=1)
             nd.Polygon(layer=layer, points=outline).\
                 put(height_tap, -gap2-0.5*width_sig, -90)
         return C

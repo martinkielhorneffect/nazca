@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Nazca.  If not, see <http://www.gnu.org/licenses/>.
 
-# @author: Ronald Broeke (c) 2016-2017
+# @author: Ronald Broeke and Xaveer Leijtens (c) 2016-2017
 # @email: ronald.broeke@brightphotonics.eu
 #-----------------------------------------------------------------------
 
@@ -40,6 +40,7 @@ from .gds_base import gds_db_unit as gridsize
 from .util import md5
 from .font import text as textput
 import nazca as nd
+from .generic_bend import curve2polyline,gb_point,gb_coefficients,cbend_point
 
 
 def layeriter(xs=None, layer=None, dogrowy=False):
@@ -61,16 +62,27 @@ def layeriter(xs=None, layer=None, dogrowy=False):
     if layer is not None:
         layer = nd.get_layer(layer)
         lt = cfg.layer_table
+        if lt.empty:
+            #print("Warning: using unknown layer {0}."\
+            #      " Adding it to the layer_table."\
+            #      " To avoid this message you can use:\n"\
+            #      "     add_layer(layer={0})".format(layer))
+            nd.add_layer(layer=layer)
+            lt = cfg.layer_table
         growx, growy = 0, 0 # a layer not as part of a xs has no grow
         try:
             lineitem = lt[(lt['layer'] == layer[0]) & (lt['datatype'] == layer[1])]
+        except:
+            raise
+        try:
             accuracy = lineitem['accuracy']
             if accuracy.empty:
                 raise Exception()
             else:
                 accuracy = accuracy.iloc[0]
-        except:
+        except Exception as E:
             print("Error: accuracy not defined for layer {}.".format(layer))
+            print(E)
             accuracy = 0.001
         if dogrowy:
             yield layer, growx, growy, accuracy
@@ -80,51 +92,62 @@ def layeriter(xs=None, layer=None, dogrowy=False):
     if xs is not None:
         try:
             ML = cfg.XSdict[xs].mask_layers
-            if ML.empty:
-                warnings.warn("xsection '{0}' has no layers. "\
-                    "Continuing export using fallback layer {1}.\n"\
-                    "Recommended solutions: Use a different xsection "\
-                    "or add layers to this xsection:\n"\
-                    "add_layer2xsection('{0}', layer=<num>).".\
-                    format(xs, cfg.default_dump_layer), stacklevel=0)
-                if dogrowy:
-                     yield (cfg.default_dump_layer, 0), 0, 0, 0.1
-                else:
-                    yield (cfg.default_dump_layer, 0), 0, 0.1
-            else:
-                layer_info = ML[['layer', 'datatype', 'growx', 'growy', 'accuracy']]
-                for i, layer, datatype, growx, growy, accuracy in layer_info.itertuples():
-                    if dogrowy:
-                        yield (layer, datatype), growx, growy, accuracy
-                    else:
-                        yield (layer, datatype), growx, accuracy
         except:
-            _handle_missing_xs(xs)
+            layer = _handle_missing_xs(xs)
+            ML = cfg.XSdict[xs].mask_layers
+
+        if ML.empty:
+            warnings.warn("xsection '{0}' has no layers. "\
+                "Continuing by adding fallback layer '{1}' to '{0}'.\n"\
+                "Recommended solutions: Use a different xsection "\
+                "or add layers to this xsection:\n"\
+                "add_layer2xsection('{0}', layer=<num>).".\
+                format(xs, cfg.default_dump_layer), stacklevel=0)
             if dogrowy:
-                yield (cfg.default_dump_layer, 0), 0, 0, 0.1
+                 yield cfg.default_dump_layer, 0, 0, 0.1
             else:
-                yield (cfg.default_dump_layer, 0), 0, 0.1
+                yield cfg.default_dump_layer, 0, 0.1
+        else:
+            layer_info = ML[['layer', 'datatype', 'growx', 'growy', 'accuracy']]
+            for i, layer, datatype, growx, growy, accuracy in layer_info.itertuples():
+                if dogrowy:
+                    yield (layer, datatype), growx, growy, accuracy
+                else:
+                    yield (layer, datatype), growx, accuracy
 
 
 def _handle_missing_xs(xs):
-    """Handle missing xsection.
+    """Handle missing xsections.
 
     If xsection <xs> is not defined, create a default xsection with layer.
     A warning is issued, unless the Nazca default xsection is created.
 
+    If the xsection exists but has not mask_layer attribute this function
+    will add a default layer.
+
     Returns:
-        None
+        layer: layer if any has been created in this method.
     """
+    layer = None
     if xs not in cfg.XSdict.keys():
-        if xs != cfg.default_xs_name:
+        if xs != cfg.default_xs_name and xs != cfg.default_xserror_name:
             print("Warning: No xsection named '{0}'. "\
                 "Correct the name or add the xsection with:\n"\
                 "add_xsection('{0}') to get rid of this warning. "\
                 "Already available xsections are {1}.\n".\
                 format(xs, list(cfg.XSdict.keys())))
         nd.add_xsection(xs)
-        nd.add_layer2xsection(xs,layer=cfg.default_dump_layer)
-    return None
+
+    try:
+        nd.get_xsection(xs).mask_layers
+    except:
+        if xs == cfg.default_xserror_name:
+            layer = cfg.default_error_layer
+        else:
+            layer = cfg.default_dump_layer
+        nd.add_layer2xsection(xs, layer=layer)
+    return layer
+
 
 #==============================================================================
 #   Waveguide element definitions
@@ -164,11 +187,11 @@ def Tp_straight(length=10, width=1.0, xs=None, layer=None, edge1=None,
 
         if name is None:
             name = 'straight'
-
+        assert width is not None
         with Cell(name=name, cnt=True) as guide:
             guide.instantiate = False
-            guide.put_pin(name='a0', width=width, xs=xs, show=True, connect=(0, 0, 180))
-            guide.put_pin(name='b0', width=width, xs=xs, show=True, connect=(length, 0, 0))
+            nd.Pin(name='a0', width=width, xs=xs, show=True).put(0, 0, 180)
+            nd.Pin(name='b0', width=width, xs=xs, show=True).put(length, 0, 0)
             guide.length_geo = length
 
             for lay, growx, growy, acc in layeriter(xs, layer, dogrowy=True):
@@ -185,7 +208,7 @@ def Tp_straight(length=10, width=1.0, xs=None, layer=None, edge1=None,
                         Fp2.append((length*t, -edge2(t)-growx))
                     outline = Fp1 + list(reversed(Fp2))
 
-                guide.put_polygon(layer=lay, points=outline)
+                nd.Polygon(layer=lay, points=outline).put(0)
         return guide
     return cell
 
@@ -239,8 +262,8 @@ def Tp_taper(length=100, width1=2, width2=3, xs=None, layer=None, name=None):
             else:
                 pin = ['a0', 'b0']
 
-            taper.put_pin(name=pin[0], width=width1, xs=xs, show=True, connect=(0, 0, 180))
-            taper.put_pin(name=pin[1], width=width2, xs=xs, show=True, connect=(length, 0, 0))
+            nd.Pin(name=pin[0], width=width1, xs=xs, show=True).put(0, 0, 180)
+            nd.Pin(name=pin[1], width=width2, xs=xs, show=True).put(length, 0, 0)
             taper.length_geo = length
 
 
@@ -250,7 +273,7 @@ def Tp_taper(length=100, width1=2, width2=3, xs=None, layer=None, name=None):
                 twidth2 = width2 + 2 * growx
                 outline = [(0-growy, twidth1 / 2), (length+growy, twidth2 / 2),
                     (length+growy, -twidth2 / 2), (0-growy, -twidth1 / 2)]
-                taper.put_polygon(layer=lay, points=outline)
+                nd.Polygon(layer=lay, points=outline).put()
         return taper
     return cell
 
@@ -300,8 +323,8 @@ def Tp_ptaper(length=100, width1=1.0, width2=3.0, xs=None, layer=None,
                 direction = 1
                 x0 = 0
 
-            taper.put_pin(name='a0', width=width1, xs=xs, show=True, connect=(0, 0, 180))
-            taper.put_pin(name='b0', width=width2, xs=xs, show=True, connect=(length, 0, 0))
+            nd.Pin(name='a0', width=width1, xs=xs, show=True).put(0, 0, 180)
+            nd.Pin(name='b0', width=width2, xs=xs, show=True).put(length, 0, 0)
             taper.length_geo = length
 
             for lay, grow, acc in layeriter(xs, layer):
@@ -313,7 +336,7 @@ def Tp_ptaper(length=100, width1=1.0, width2=3.0, xs=None, layer=None,
                         (0, 0.5*twidth1), (length, 0.5*twidth2),
                         (length, -0.5*twidth2), (0, -0.5*twidth1)
                     ]
-                    taper.put_polygon(layer=lay, points=points)
+                    nd.Polygon(layer=lay, points=points).put(0)
                     continue
                 # y = a * x**2
                 a = 4 * length / (twidth2**2 - twidth1**2)
@@ -332,7 +355,7 @@ def Tp_ptaper(length=100, width1=1.0, width2=3.0, xs=None, layer=None,
                         break
                 ptop.append((x0+direction*length,  0.5*twidth2))
                 pbot.append((x0+direction*length, -0.5*twidth2))
-                taper.put_polygon(layer=lay, points=ptop + list(reversed(pbot)))
+                nd.Polygon(layer=lay, points=ptop + list(reversed(pbot))).put(0)
         return taper
     return cell
 
@@ -399,12 +422,12 @@ def Tp_arc(radius=10, width=1.0, angle=90, xs=None, layer=None, offset=None,
         if offset is None:
             offset = __get_offset(xs, width, radius)
 
-        Nmax = 98 # 2x98 + 4 = 200
+        Nmax = 298 # 2x298 + 4 = 600 (max in GDSII spec)
         with Cell(name=name, cnt=True) as guide:
             guide.instantiate = False
-            guide.put_pin(name='a0', width=width, xs=xs, show=True, connect=(0, 0, 180))
-            guide.put_pin(name='b0', width=width, xs=xs, show=True,
-                connect=(radius*sin(abs(ang)), sign*radius*(1-cos(ang)), angle))
+            nd.Pin(name='a0', width=width, xs=xs, show=True).put(0, 0, 180)
+            nd.Pin(name='b0', width=width, xs=xs, show=True).\
+                put(radius*sin(abs(ang)), sign*radius*(1-cos(ang)), angle)
             guide.length_geo = abs(radius*ang)
 
             if ang == 0:
@@ -445,16 +468,139 @@ def Tp_arc(radius=10, width=1.0, angle=90, xs=None, layer=None, offset=None,
                     outline = pstart\
                         + p1[s:s + Nmax]\
                         + list(reversed(p2[s:s + Nmax]))
-                    guide.put_polygon(layer=lay, points=outline)
+                    nd.Polygon(layer=lay, points=outline).put(0)
                     pstart = [p2[s + Nmax - 1], p1[s + Nmax - 1]]
 
                 outline = pstart\
                      + p1[section[-1]:section[-1] + Nmax]\
                      + pend\
                      + list(reversed(p2[section[-1]:section[-1] + Nmax]))
-                guide.put_polygon(layer=lay, points=outline)
+                nd.Polygon(layer=lay, points=outline).put(0)
         return guide
     return cell
+
+
+def Tp_ccurve(width=1, distance=200, offset=20, xs=None,
+        layer=None, name=None):
+    """Template for creating parametrized cosine curve waveguide function.
+
+    Args:
+        width (float): width of the interconnect in um
+        pin (Node): optional Node for modeling info
+        xs (str): xsection of cbend
+        distance (float): total forward length of the cbend in um
+        offset (float): lateral offset of the cbend in um
+        xs (str): xsection of waveguide
+        layer (int | str): layer number or layername
+
+    Returns:
+        function: Function returning a Cell object with the ccurve guide
+    """
+
+    def cell(width=width, distance=distance, offset=offset, xs=xs,
+            layer=layer, name=name):
+        """Create a cosine bend waveguide element.
+
+        Args:
+            width (float): width of the interconnect in um
+            pin (Node): optional Node for modeling info
+            xs (str): xsection of cbend
+            offset (float): lateral offset of the cbend in um
+            distance (float): total forward length of the cbend in um
+            xs (str): xsection of waveguide
+            layer (int | str): layer number or layername
+
+        Returns:
+            Cell: ccurve element
+        """
+
+        if name is None:
+            name = 'ccurve'
+
+
+        xya = (distance, offset, 0) # End point
+        # ccurve waveguide, cwg
+        with Cell(name=name, cnt=True) as cwg:
+            cwg.instantiate = False
+            nd.Pin(name='a0', width=width, xs=xs, show=True).put(0, 0, 180)
+            nd.Pin(name='b0', width=width, xs=xs, show=True).put(*xya)
+
+            for lay, growx, growy, acc in layeriter(xs, layer, dogrowy=True):
+                # sampled curve
+                xy = curve2polyline(cbend_point, xya, acc, (distance, offset))
+                # polygon of proper width
+                xy = nd.util.polyline2polygon(xy, width+growx*2)
+                nd.Polygon(layer=lay, points=xy).put(0)
+        return cwg
+    return cell
+
+
+def Tp_pcurve(xya=(100,100,10), width=1.0, Rin=0, Rout=0, Oin=None,
+        Oout=None, xs=None, layer=None, name=None):
+    """Template for creating parametrized pcurve waveguide function.
+
+    Args:
+        xya (point): point to connect to from (0,0,0)
+        width (float): width of waveguide
+        Rin (float): radius at start (0 is no curvature)
+        Rout (float): radius at end (0 is no curvature)
+        Oin (float | function): positive offset reduces radius.
+            The offset can be a function F(width, radius) that returns a float
+        Oout (float | function): positive offset reduces radius.
+            The offset can be a function F(width, radius) that returns a float
+        xs (str): xsection of waveguide
+        layer (int | str): layer number or layername
+
+    Returns:
+        function: Function returning a Cell object with the pcurve guide
+    """
+
+    def cell(xya=xya, width=width, Rin=Rin, Rout=Rout, Oin=Oin, Oout=Oout,
+            xs=xs, layer=layer, name=name):
+        """Create a pcurve waveguide element.
+
+        Args:
+            xya (point): point to connect to from (0,0,0)
+            width (float): width of waveguide
+            xs (str): xsection of waveguide
+            layer (int | str): layer number or layername
+
+        Returns:
+            Cell: pcurve element
+        """
+
+        if name is None:
+            name = 'pcurve'
+
+        if Oin is None:
+            Oin = __get_offset(xs, width, Rin)
+            Rin = Rin - Oin
+        if Oout is None:
+            Oout = __get_offset(xs, width, Rout)
+            Rout = Rout - Oout
+
+        # pcurve waveguide, pwg
+        with Cell(name=name, cnt=True) as pwg:
+            pwg.instantiate = False
+            nd.Pin(name='a0', width=width, xs=xs, show=True).put(0, -Oin, 180)
+            xya = (xya[0], xya[1]-Oin, xya[2])
+            nd.Pin(name='b0', width=width, xs=xs, show=True).put(*xya)
+
+            xya = (xya[0]-Oout*sin(np.radians(xya[2])),
+                xya[1]+Oout*cos(np.radians(xya[2])), xya[2])
+            # Solve the generic bend
+            A, B, L = gb_coefficients(xya, Rin=Rin, Rout=Rout)
+            pwg.length_geo = L
+
+            for lay, growx, growy, acc in layeriter(xs, layer, dogrowy=True):
+                # sampled curve
+                xy = curve2polyline(gb_point, xya, acc, (A, B, L))
+                # polygon of proper width
+                xy = nd.util.polyline2polygon(xy, width+growx*2)
+                nd.Polygon(layer=lay, points=xy).put(0)
+        return pwg
+    return cell
+
 
 
 #TODO: not supposed to be defined in this template module.
@@ -492,6 +638,8 @@ strt   = Tp_straight()
 bend   = Tp_arc()
 ptaper = Tp_ptaper()
 taper  = Tp_taper()
+pcurve = Tp_pcurve()
+cbend  = Tp_ccurve()
 
 #These will be removed:
 #sw = Tp_straight()

@@ -26,10 +26,11 @@ import numpy as np
 import pandas as pd
 import os.path
 
-
 import matplotlib.pyplot as mplt
 from matplotlib.patches import Polygon as matPolygon
 from matplotlib.collections import PatchCollection
+
+import svgwrite
 
 from . import gds
 from . import gds_base as gbase
@@ -40,6 +41,7 @@ from . import cfg
 from .util import isnotebook
 from IPython.core.display import display, HTML
 from pprint import pprint
+from . import util
 
 
 #==============================================================================
@@ -52,7 +54,7 @@ class SPT():
         self.Fspt = None
         self.bb_cnt = 0
 
-    def open(self, filename):
+    def open(self, filename=None):
         """Initialize spt file export."""
         self.Fspt = None # spt-file handle
         self.spt_filename = os.path.splitext(filename)[0] + '.spt'
@@ -113,6 +115,87 @@ Spt = SPT()
 
 
 #==============================================================================
+# svg
+#==============================================================================
+class SVG():
+    """Handle svg compatible export of masks."""
+
+    def __init__(self, filename='nazca_export.svg'):
+        #if filename is not None:
+        #    filename = os.path.splitext(filename)[0] + '.svg'
+        self.drawing = svgwrite.Drawing(filename=filename, size=('100%', '100%'),
+            profile='tiny', debug=False)
+        self.minx = 1e6
+        self.miny = 1e6
+        self.maxx = -1e6
+        self.maxy = -1e6
+
+    def open(self):
+        """Open svg.
+
+        Open after layer colors have been loaded.
+
+        Returns:
+            None
+        """
+        # create a map of defined layer colors to speed up lookup
+        self.layermap = defaultdict(list)
+        if not cfg.colors.empty:
+            for i, row in cfg.colors.loc[:, ['layer', 'datatype']].iterrows():
+                ML = (int(row[0]), int(row[1]))
+                self.layermap[ML].append(i)
+        self.cmap = cfg.plt_cmap
+        self.cmaplen = len(self.cmap)
+        self.alpha = cfg.plt_alpha
+
+
+    def add_polygon(self, layer, points, bbox):
+        """Add a polygon to the SVG drawing."""
+
+        lay = (int(layer[0]), int(layer[1]))
+        for colorentry in self.layermap[lay]:
+            colors = cfg.colors.loc[colorentry]
+            if isinstance(colors, pd.DataFrame):
+                colors = colors.iloc[0] #TODO: make loop , not only first color
+            if not colors['visible']:
+                continue
+            edgecolor = colors['frame_color']
+            facecolor = colors['fill_color']
+            alpha = colors['alpha']
+            lw = colors['width']
+            if colors['dither_pattern'] == 'I1':
+                fill_opacity = 0
+            else:
+                fill_opacity = alpha
+            self.g = self.drawing.g(
+                stroke=edgecolor,
+                stroke_opacity=alpha,
+                fill=facecolor,
+                fill_opacity=fill_opacity,
+                stroke_width=lw)
+            self.mask = self.drawing.add(self.g)
+
+            p = self.drawing.polygon(points=points, transform="scale(1,-1)")
+            self.mask.add(p)
+
+            if self.minx > bbox[0]:
+                self.minx = bbox[0]
+            if self.maxx < bbox[2]:
+                self.maxx = bbox[2]
+            if self.miny > bbox[1]:
+                self.miny = bbox[1]
+            if self.maxy < bbox[3]:
+                self.maxy = bbox[3]
+
+    def close(self):
+        x, y, w, h = self.minx, self.miny, self.maxx-self.minx, self.maxy-self.miny
+        self.drawing.viewbox(minx=x, miny=-y-h, width=w, height=h)
+        self.drawing.save()
+
+Svg = SVG()
+
+
+#==============================================================================
 # matplotlib export
 #==============================================================================
 class Matplot():
@@ -121,17 +204,19 @@ class Matplot():
     def __init__(self):
         """Construct an object handling Matplotlib exports."""
 
-        font = {
-            #'family'  : 'normal',
-            'style'   : 'normal',
-            'weight' : 'light', #'light', 'normal', 'medium', 'semibold', 'bold', 'heavy', 'black'
-            'size'   : 14}
-
+        try:
+            font = cfg.matplotlib_font
+        except:
+            font = {
+                #'family'  : 'normal',
+                'style'   : 'normal',
+                'weight' : 'light', #'light', 'normal', 'medium', 'semibold', 'bold', 'heavy', 'black'
+                'size'   : 24}
         mplt.rc('font', **font)
 
 
     def open(self, cell=None, title=None):
-        """Inititialize Matplotlib mask output"""
+        """Inititialize Matplotlib mask output."""
         self.cell = cell
 
         #print('TITLE', title)
@@ -166,12 +251,21 @@ class Matplot():
         self.alpha = cfg.plt_alpha
 
 
-    def add_polygon(self, layer, points):
+    def add_polygon(self, layer, points, bbox):
         """Add a polygon to the plot.
 
-        Note that using linewidth > 0  significantly slows down drawing.
-        """
+        Note that using linewidth > 0 significantly slows down drawing in Matplotlib.
 
+        Args:
+            layer (int, int): mask layer
+            points (list of (float, float)): polygon points
+            bbox (tuple of floats): bounding box of polygon (x1, y1, x2, y2)
+
+        Returns:
+            None
+        """
+        if layer == cfg.documentation_pin_layer:
+            return None
         polygon = None
         lay = (int(layer[0]), int(layer[1]))
         if lay not in self.layermap:
@@ -189,7 +283,6 @@ class Matplot():
                 fill=True,
                 lw=lw,
                 alpha=alpha)
-            #print('NOT in map:', layer, facecolor)
 
         else:
             # use preset layer colors
@@ -204,6 +297,10 @@ class Matplot():
                 facecolor = colors['fill_color']
                 alpha = colors['alpha']
                 lw = colors['width']
+                if colors['dither_pattern'] == 'I1':
+                    fill = False
+                else:
+                    fill = True
                 #lw = 0 #matplotlib very slow with lw != 0
 
                 polygon = matPolygon(
@@ -211,25 +308,35 @@ class Matplot():
                     closed=True,
                     edgecolor=edgecolor,
                     facecolor=facecolor,
-                    fill=True,
+                    fill=fill,
                     lw=lw,
                     alpha=alpha)
-                #print('in map:', layer, facecolor)
 
         if polygon is not None:
             self.patches.append(polygon)
+            if self.minx > bbox[0]:
+                self.minx = bbox[0]
+            if self.maxx < bbox[2]:
+                self.maxx = bbox[2]
+            if self.miny > bbox[1]:
+                self.miny = bbox[1]
+            if self.maxy < bbox[3]:
+                self.maxy = bbox[3]
 
-            if self.minx > np.array(points).T[0].min():
-                self.minx = np.array(points).T[0].min()
-            if self.maxx < np.array(points).T[0].max():
-                self.maxx = np.array(points).T[0].max()
-            if self.miny > np.array(points).T[1].min():
-                self.miny = np.array(points).T[1].min()
-            if self.maxy < np.array(points).T[1].max():
-                self.maxy = np.array(points).T[1].max()
+            addbbox = False
+            if addbbox:
+                polygon = matPolygon(
+                        [(bbox[0], bbox[1]), (bbox[2], bbox[1]), (bbox[2], bbox[3]), (bbox[0], bbox[3])],
+                        closed=True,
+                        edgecolor='#00FF00',
+                        facecolor=facecolor,
+                        fill=False,
+                        lw=1,
+                        alpha=alpha)
+                self.patches.append(polygon)
 
 
-    def add_polyline(self, layer, points, width):
+    def add_polyline(self, layer, points, width, bbox):
         """Add a polyline to the plot."""
 
 
@@ -249,13 +356,15 @@ class Matplot():
         xtot = dx+2*buf
         ytot = dy+2*buf
         aspect = ytot/xtot
-        factor = 0.5
+        factor = 1.0
         if aspect > factor:
-            size = factor*self.figsize/aspect
+            ysize = self.figsize
+            xsize = ysize/aspect
         else:
-            size = self.figsize
+            xsize = self.figsize
+            ysize = 1.2*xsize*aspect
 
-        fig, ax = mplt.subplots(figsize=(size, size*aspect),\
+        fig, ax = mplt.subplots(figsize=(xsize, ysize),\
             facecolor=cfg.plt_background_outside)
         p = PatchCollection(self.patches, match_original=True)
 
@@ -280,14 +389,69 @@ class Matplot():
         ax.set_title(self.title)
 
         # cell info available under self.cell:
-        dt = 0.02*domain
-        for name, pin in self.cell.pin.items():
-            if name == 'org' or not pin.show or (pin.type == 'bbox' and not cfg.bbox_stubs):
-                continue
-            at = pin.pointer.a
-            xt = pin.pointer.x + dt*cos(radians(at))
-            yt = pin.pointer.y + dt*sin(radians(at))
-            ax.text(xt, yt, name, ha='center', va='center', rotation=0, wrap=True)
+        try:
+            pin_ignore = cfg.pin_settings['bb_docu_pin_ignore']
+        except:
+            pin_ignore = []
+        if cfg.pin_settings['bb_pin_layer'] != cfg.documentation_pin_layer:
+            dt = 0.02*domain
+            for name, pin in self.cell.pin.items():
+                if name == 'org' or\
+                    (pin.type == 'bbox' and  not cfg.bbox_stubs) or\
+                    name in pin_ignore:
+                       continue
+                at = pin.pointer.a
+                xt = pin.pointer.x + dt*cos(radians(at))
+                yt = pin.pointer.y + dt*sin(radians(at))
+                ax.text(xt, yt, name, ha='center', va='center', rotation=0, wrap=True)
+        else: #docu-pins
+            try:
+                pin_scale = cfg.pin_settings['bb_docu_pin_scale']
+            except:
+                pin_scale = 1/15
+                print("No 'bb_docu_pin_scale' set. Using {}".format(pin_scale))
+            try:
+                pin_shape = cfg.pin_settings['bb_docu_pin_shape']
+            except:
+                pin_shape = 'arrow_full'
+                print("No 'bb_docu_pin_shape' set. Using '{}'".format(pin_shape))
+
+            docu_patches = []
+            d_text = 0.40
+            fontsize = 20 * 15*pin_scale
+            scale = domain*pin_scale
+            shape = cfg.pinshapes[pin_shape]
+            dt = -d_text*pin_scale*domain
+            for name, pin in self.cell.pin.items():
+                #not pin.show or
+                if name == 'org' or\
+                    (pin.type == 'bbox' and  not cfg.bbox_stubs) or\
+                    name in pin_ignore:
+                        continue
+                at = pin.pointer.a
+                xt = pin.pointer.x + dt*cos(radians(at))
+                yt = pin.pointer.y + dt*sin(radians(at))
+
+                ax.text(xt, yt, name, fontsize=fontsize, rotation=0.,
+                    ha="center", va="center", weight='bold'
+                    #bbox=dict(boxstyle="round", ec=(1, 1, 1), fc=(1, 1, 1))
+                )
+                points = util.transform_polygon(points=shape,
+                    da=at, scale=scale, x=pin.pointer.x, y=pin.pointer.y)
+                polygon = matPolygon(
+                    xy=points,
+                    closed=True,
+                    edgecolor='#000000',
+                    facecolor='#FFFFFF',
+                    fill=True,
+                    lw=3,
+                    alpha=0.5)
+                docu_patches.append(polygon)
+            if docu_patches:
+                p = PatchCollection(docu_patches, match_original=True)
+                ax.add_collection(p)
+
+        mplt.axis('scaled')
         mplt.tight_layout()
 
         #ax.set_facecolor(cfg.plt_background_inside)
@@ -304,7 +468,6 @@ class Matplot():
 matplot = Matplot()
 
 
-
 tab = '  '
 class Export_layout():
 
@@ -312,82 +475,116 @@ class Export_layout():
         self.gds_files = dict() # existing gds files used in the layout
 
     def add_polygons(self, netlist, cnode, trans, flip, infolevel=0):
-        """Add polygons content to cell."""
+        """Add polygons content to cell.
+
+        Returns:
+            bytestring: gds stream
+        """
         content = []
         s = 1
         if flip:
             s = -1
-        polygons = netlist.polygon_iter(cnode, infolevel=infolevel)
-        for org, layer, points in polygons:
+        for org, pgon in netlist.polygon_iter(cnode, infolevel=infolevel):
             if flip:
                 org = org.copy()
                 org.flip()
             [x0, y0, a0] = org.multiply_ptr(trans).get_xya()
             a = s*np.radians(a0)
-            xy = [(x0+cos(a)*u-sin(a)*v, y0+s*(sin(a)*u+cos(a)*v)) for u, v in points]
+            xy = [(x0+cos(a)*u-sin(a)*v, y0+s*(sin(a)*u+cos(a)*v))
+                for u, v in pgon.points]
             if self.gds:
-                content.append(gbase.gds_polygon(xy, lay=int(layer[0]),
-                    datatype=int(layer[1])))
-            if self.plt:
-                matplot.add_polygon(layer, xy)
+                content.append(gbase.gds_polygon(xy, lay=int(pgon.layer[0]),
+                    datatype=int(pgon.layer[1])))
+            if self.plt or self.svg:
+                x1, y1, x2, y2 = pgon.bbox
+                bbox = ( x0+cos(a)*x1-sin(a)*y1, y0+s*(sin(a)*x1+cos(a)*y1),
+                         x0+cos(a)*x2-sin(a)*y2, y0+s*(sin(a)*x2+cos(a)*y2) )
+                if self.plt:
+                    matplot.add_polygon(pgon.layer, xy, bbox)
+                if self.svg:
+                    Svg.add_polygon(pgon.layer, xy, bbox)
+
         return b''.join(content)
 
 
     def add_polylines(self, netlist, cnode, trans, flip, infolevel=0):
-        """Add polylines content to cell."""
+        """Add polylines content to cell.
+
+        Returns:
+            bytestring: gds stream
+        """
         content = []
         s = 1
         if flip:
             s = -1
-        polylines = netlist.polyline_iter(cnode, infolevel=infolevel)
-        for org, width, layer, pathtype, points in polylines:
+        for org, pline in netlist.polyline_iter(cnode, infolevel=infolevel):
             if flip:
                 org = org.copy()
                 org.flip()
             [x0, y0, a0] = org.multiply_ptr(trans).get_xya()
             a = s*np.radians(a0)
-            xy = [(x0+cos(a)*u-sin(a)*v, y0+s*(sin(a)*u+cos(a)*v)) for u, v in points]
+            xy = [(x0+cos(a)*u-sin(a)*v, y0+s*(sin(a)*u+cos(a)*v))
+                for u, v in pline.points]
             if self.gds:
-                content.append(gbase.gds_polyline(xy, width,
-                    lay=int(layer[0]), datatype=int(layer[1]),
-                    pathtype=pathtype))
-            if self.plt:
-                 matplot.add_polyline(layer, xy, width)
+                content.append(gbase.gds_polyline(xy, pline.width,
+                    lay=int(pline.layer[0]), datatype=int(pline.layer[1]),
+                    pathtype=pline.pathtype))
+            if self.plt or self.svg:
+                x1, y1, x2, y2 = pline.bbox
+                bbox = ( x0+cos(a)*x1-sin(a)*y1, y0+s*(sin(a)*x1+cos(a)*y1),
+                         x0+cos(a)*x2-sin(a)*y2, y0+s*(sin(a)*x2+cos(a)*y2) )
+                polygon_xy = util.polyline2polygon(xy, width=pline.width, miter=0.5)
+                if self.plt:
+                    matplot.add_polygon(pline.layer, polygon_xy, bbox)
+                    #matplot.add_polyline(pline.layer, xy, pline.width, bbox)
+                if self.svg:
+                    Svg.add_polygon(pline.layer, polygon_xy, bbox)
         return b''.join(content)
 
 
     def add_annotations(self, netlist, cnode, trans, flip, infolevel=0):
-        """Add annotation content to cell."""
+        """Add annotation content to cell.
+
+        Returns:
+            bytestring: gds stream
+        """
         content = []
-        annotations = netlist.annotation_iter(cnode, infolevel=infolevel)
-        for org, layer, text in annotations:
+        for org, anno in netlist.annotation_iter(cnode, infolevel=infolevel):
             if flip:
                 org = org.copy()
                 org.flip()
             x0, y0 = org.multiply_ptr(trans).get_xy()
             if self.gds:
-                content.append(gbase.gds_annotation(xy=[x0, y0], string=text,
-                    lay=int(layer[0]), datatype=int(layer[1])))
+                content.append(gbase.gds_annotation(xy=[x0, y0], string=anno.text,
+                    lay=int(anno.layer[0]), datatype=int(anno.layer[1])))
         return b''.join(content)
 
 
     def add_gdsfiles(self, netlist, cnode, trans, flip, infolevel=0):
-        """Add gds instances to cell."""
+        """Add gds instances to cell.
+
+        Returns:
+            bytestring: gds stream
+        """
         content = []
         gdsfiles = netlist.gdsfile_iter(cnode, infolevel=infolevel)
-        for org, filename, cellname, newcellname, layermap, cellmap, scale\
-                in gdsfiles:
+        for org, filename, cellname, newcellname, layermap, cellmap, scale,\
+                strm in gdsfiles:
             [x0, y0, a0] = org.multiply_ptr(trans).get_xya()
             if self.gds:
                 content.append(gds.cell_reference([x0, y0], newcellname, a0, mag=scale, flip=flip))
                 if newcellname not in self.gds_files:
                     self.gds_files[newcellname] = (filename, cellname,
-                        layermap, cellmap, scale)
+                        layermap, cellmap, scale, strm)
         return b''.join(content)
 
 
     def add_instances(self, instance_iter, level, infolevel=0):
-        """Add instances to cell"""
+        """Add instances to cell.
+
+        Returns:
+            bytestring: gds stream
+        """
         content = []
         for instance in instance_iter:
             cnode = instance #, cnode_iter, position = instance
@@ -441,8 +638,11 @@ class Export_layout():
 
     fliplast = False
     def process_cell(self, netlist, cnode, orgtrans, level, instance, flip):
-        """Process a cell (via its cnode) and generate content from it."""
+        """Process a cell (via its cnode) and generate content from it.
 
+        Returns:
+            None
+        """
         global fliplast
         cellname = cnode.cell.cell_name
 
@@ -487,15 +687,16 @@ class Export_layout():
         Returns:
             None
         """
-
         if self.output == 'file':
             mplt.ioff()
-            print('Switched of Matplotlib interactive output.')
+            #print('Switched of Matplotlib interactive output.')
 
         cells_visited = set()
         for topcell in topcells:
             if self.plt: #separate plot for each topcell.
                 matplot.open(topcell, self.title)
+            if self.svg: #separate plot for each topcell.
+                Svg.open()
             self.export_levels = [] # netlist levels corrresponding to export levels.
             self.cell_content = dict() # collect cell content per level.
             self.translist = []
@@ -504,7 +705,8 @@ class Export_layout():
             level_duplicate = 100 # level
 
             netlist = Netlist()
-            cells = netlist.celltree_iter(topcell.cnode, infolevel=0)
+            cells = netlist.celltree_iter(topcell.cnode, flat=self.flat,
+                infolevel=0)
             for cnode, level, org, flip in cells:
                 if level > level_duplicate: #skip cells that are copies of previous cells.
                     continue
@@ -524,9 +726,13 @@ class Export_layout():
                 else:
                     inst = False
 
-                if not inst or cellname not in cells_visited: #new cell:
+                visited = cellname in cells_visited
+                if not inst or not visited: #new cell or flat:
                     if self.infolevel > 0:
-                        print('{}create cell {}'.format('-'*len(tab)*level, info))
+                        if not visited:
+                            print('{}create cell {}'.format('-'*len(tab)*level, info))
+                        else:
+                            print('{}re-use cell {}'.format('-'*len(tab)*level, info))
                     cells_visited.add(cellname)
                     self.process_cell(netlist, cnode, org, level, inst, flip)
                     level_last = level
@@ -558,7 +764,7 @@ class Export_layout():
             if self.infolevel > 0:
                 print('----\nsave external gds instances')
             for newcellname, mapping in self.gds_files.items():
-                filename, cellname, layermap, cellmap, scale = mapping
+                filename, cellname, layermap, cellmap, scale, strm = mapping
                 g = gstream.GDSII_stream(filename, cellmap=cellmap, layermap=layermap)
                 stream = g.GDSII_stream_cell(newcellname)
                 self.gds_outfile.write(stream)
@@ -576,6 +782,7 @@ class Export_layout():
         flat=False,
         spt=False,
         plt=False,
+        svg=False,
         clear=False,
         title=None,
         output=None,
@@ -604,9 +811,12 @@ class Export_layout():
         """
         self.fln = filename
         self.gds = gds_
+        if do_ascii:
+            self.gds = True
         self.flat = flat
         self.spt = spt
         self.plt = plt
+        self.svg = svg
         self.Fspt = Spt.Fspt
         self.title = title
         self.output = output
@@ -618,6 +828,11 @@ class Export_layout():
             print('Did you mean: export_gds(filename=\'' + topcells + '\')?')
             return 0
 
+        if not isinstance(filename, str):
+            print("WARNING: Filename provided is not a string but a {}."\
+                  " Using filename 'export_nazca.gds' instead.".format(type(self.fln)))
+            self.fln = 'export_nazca.gds'
+
         if self.infolevel > 0:
             print('gds:{}, plt:{}, spt:{}, flat:{}'.format(
                 self.gds, self.plt, self.spt, self.flat))
@@ -627,12 +842,13 @@ class Export_layout():
         if not clear: #keep default topcell open
             for cell in cfg.cells[1:-1:-1]:
                 cell.close()
-            cfg.cells[0].solve() #solve default topcell
+                if not cfg.solve_direct:
+                    cfg.cells[0]._solve() #solve (still open) default topcell
         else:
             for cell in cfg.cells[::-1]:
                 cell.close()
 
-        # contruct a list of topcells
+        # construct a list of topcells
         if topcells is None:
             topcells = []
         if not topcells: # 0 topcells
@@ -658,13 +874,29 @@ class Export_layout():
            self.export_topcells(topcells, show_cells)
 
         if clear: #Create a new default cell.
-            cfg.cellnames.pop(cfg.defaultcellname) #avoid triggering cell reuse warning
-            cfg.defaultcell = Cell(name=cfg.defaultcellname)
-            cfg.cp = cfg.defaultcell.org
+            clear_layout()
             if self.infolevel > 0:
                 print("Recreated topcell '{}'.".format(cfg.defaultcellname))
 
         return None
+
+
+def clear_layout():
+    """Remove all cell references to start a new layout.
+
+    A new topcell 'nazca' will be created.
+
+    Returns:
+        None
+    """
+    for name, cell in cfg.cellnames.items():
+        del cell
+    cfg.cellnames = {}
+
+    #cfg.cellnames.pop(cfg.defaultcellname) #avoid triggering cell reuse warning
+    cfg.defaultcell = Cell(name=cfg.defaultcellname)
+    cfg.cp = cfg.defaultcell.org
+    return None
 
 
 def export_clear():
@@ -678,7 +910,7 @@ def export_clear():
             cell.close()
         cfg.cellnames.pop(cfg.defaultcellname)
         cfg.defaultcell = Cell(name=cfg.defaultcellname)
-        cp = cfg.defaultcell.org
+        cfg.cp = cfg.defaultcell.org
         #if self.infolevel:
         #    print("Recreated topcell '{}'.".format(cfg.defaultcellname))
 
@@ -708,6 +940,7 @@ def export(topcells=None,
            flat=False,
            spt=False,
            plt=False,
+           svg=False,
            info=True,
            clear=True,
            title=None,
@@ -736,7 +969,7 @@ def export(topcells=None,
     """
 
     verify_topcells(topcells)
-    #TODO implement layermap filter.
+    #TODO: implement layermap filter.
     export = Export_layout()
 
     if filename is None:
@@ -758,9 +991,13 @@ def export(topcells=None,
         flat = True
         if info:
             print('...matplotlib generation')
+    if svg:
+        flat = True
+        if info:
+            print('...svg generation')
 
     export.generate_layout(topcells, filename, do_ascii, infolevel=infolevel,
-        gds_=gds, flat=flat, spt=spt, plt=plt, clear=clear, title=title,
+        gds_=gds, flat=flat, spt=spt, plt=plt, svg=svg, clear=clear, title=title,
         output=output, path=path)
 
     if spt:
@@ -768,11 +1005,20 @@ def export(topcells=None,
     if plt:
         if info:
             print('...plotting plt')
-        mplt.show()
+        if output != 'file':
+            mplt.show()
+    if svg:
+        Svg.close()
     if gds:
         pass
         #print('Done.')
     return None
+
+
+def export_svg(topcells=None, title=None, path='', **kwargs):
+    verify_topcells(topcells)
+    export(topcells, plt=False, gds=False, svg=True, info=False,
+        title=title, **kwargs)
 
 
 def export_plt(topcells=None, clear=True, title=None, output=None, path='', **kwargs):

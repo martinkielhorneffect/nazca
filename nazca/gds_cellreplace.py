@@ -25,25 +25,24 @@
 Module for replacing cells, static and parametric cells.
 """
 
-
+import sys, traceback
 import time
 from collections import Counter
-import pprint
-
+from pprint import pprint
 import nazca as nd
 
 
 
 def __findBlackCells(blackBasename, cells=[]):
     """
-    Find all "black" cells having prefix <blackBasename> in given list of <cells>.
+    Find all "black" cells starting with <blackBasename> in the given list <cells>.
 
     Args:
-        blackBasename (str): string match first part (basename) of black cells
+        blackBasename (str): string matching first part (basename) of black cells
         cells (list): list of cell names
 
     Returns:
-        list of cell names in <cells> starting with <blackprefix>
+        list of cell names in <cells> starting with <blackBasename>
     """
 
     matchingcells = []
@@ -53,22 +52,23 @@ def __findBlackCells(blackBasename, cells=[]):
     return matchingcells
 
 
-def __readPcellParams(allCellsOf1type, gdsin, infolevel=0):
-    """
-    Return a dictionary with all Pcell parameter values per cell.
+def __readPcellParams(blackBasename, gdsin, allInputCellNames, infolevel=0):
+    """Create a dictionary with a dict of all Pcell parameter values per cell.
 
     Args:
-        allCellsOf1type (str): pcell base name (without params string suffix)
+        allCellsOf1type (str): pcell base name (without parameter string suffix)
         gdsin (str): gds input file name
         infolevel (int): amount of debug info that is printed, 0 is minimum.
 
     Returns:
-        dict: cells and their parameters dict {cellname: {var: value, var: value})
-
+        dict: {cellname: {<var1>: <value1>, <var2>: <value>2}},
+            cellnames and their parameters dict
     """
 
-    if infolevel > 1:
-        print("Read params from '{}'".format(allCellsOf1type))
+    allCellsOf1type = __findBlackCells(blackBasename, allInputCellNames)
+    if infolevel == 2:
+        print("blackbox '{}'\ninstances:".format(blackBasename))
+        pprint(allCellsOf1type)
     allPcellParams = {} # dictionary of {cell: PcellStrParams}
     for cellname in allCellsOf1type:
         PcellStrParams = {}
@@ -82,13 +82,23 @@ def __readPcellParams(allCellsOf1type, gdsin, infolevel=0):
             try:
                 value = int(valuestr.split(' ')[0])
             except:
-                value = float(valuestr.split(' ')[0])
+                try:
+                    value = float(valuestr.split(' ')[0])
+                except:
+                    v = valuestr.split(' ')[0]
+                    if v == 'True':
+                        value = True
+                    elif v == 'False':
+                        value = False
+                    else:
+                        print('ERROR: parameter value not reckognized: {}'.format(v))
+
             PcellValueParams[varname] = value
 
         allPcellParams[cellname] = PcellValueParams
-        #if infolevel > 1:
-        #    print('{}\n{}\n{}', cellname, PcellStrParams, PcellValueParams)
-
+    if infolevel > 2:
+        print("\nAll Pcells of '{}' as {{name:parameters}}".format(blackBasename))
+        pprint(allPcellParams)
     return allPcellParams
 
 
@@ -104,10 +114,10 @@ def __createWhitePcellLib(gdsin, whitelibrary=None, black2whiteMap=None,
         black2whitemap (dict): mapping black cell names to white cell functions {name: function}.
         prefixb: blackbox prefix (default = 'black_')
         prefixw (str): whitebox prefix  (default = 'wb_')
-        infolevel (int): amount of debug info printed
+        infolevel (int): amount of debug info printed (default = 0)
 
     Returns:
-        str: filename of white gds Pcell library.
+        str, dict: gds filename of white Pcell library, {black-cellname: white-cellname}
     """
 
     if whitelibrary is None:
@@ -124,71 +134,83 @@ def __createWhitePcellLib(gdsin, whitelibrary=None, black2whiteMap=None,
     allInputCellNames = gdsinstream.cells.keys()
     allBlackCellNames = []
     allWhiteCells = []
+    allWhiteCellNames = []
     for blackBasename, whiteFunction in black2whiteMap.items():
-        blackCellGroup = __findBlackCells(blackBasename, allInputCellNames)
-        allBlackCellNames += blackCellGroup
-
-        cellsParams = __readPcellParams(blackCellGroup, gdsinstream,
-            infolevel=infolevel)
-        for cellname, parameters in cellsParams.items():
+        #print('whiteFunction', blackBasename, whiteFunction, )
+        if whiteFunction is None:
+            continue
+        cells_x_Params = __readPcellParams(blackBasename, gdsinstream,
+            allInputCellNames, infolevel=infolevel)
+        for cellname, parameters in cells_x_Params.items():
             try:
                 whiteCell = whiteFunction(**parameters)
                 allWhiteCells.append(whiteCell)
-            except:
-                print("Error: Can not generate whitebox {} with params {}".\
-                    format(whiteFunction, parameters))
+                allBlackCellNames.append(cellname) #inside for loop to sync order of white and black
+            except Exception as error:
+                print("Error in inside white box function or whitbox function call.\n"\
+                     " - can not generate cell '{}'\n"\
+                     " - whitebox function: {}\n"\
+                     " - parameters: {}\n".\
+                     format(cellname, whiteFunction, parameters))
+                #traceback.print_exc(file=sys.stdout)
+                raise
                 #TODO: add empty/error cell to keep black and white list in sync
-        if infolevel > 1:
-            print('\nblackBasename = ', blackBasename)
-            print('\nwhiteCellparams: ', allWhiteCells)
+        #if infolevel > 3:
+        #    print('\nblackBasename = ', blackBasename)
+        #    print('whiteCellparams:\n', allWhiteCells)
 
-    if infolevel > 1:
-        print('\nallBlackCells: {}'.format(allBlackCellNames))
-        print('\nallWhiteCells: {}'.format(allWhiteCells))
-        print('\n')
+    if infolevel > 3:
+        print("\n{:30}{}".format("allBlackCells", "allWhiteCells"))
+        for base, cell in zip(allBlackCellNames, allWhiteCells):
+            try :
+                print("{:40}{}".format(base, cell.cell_name))
+            except:
+                print("{:40}{}".format(base, cell))
 
-    #generate output cell names for all black and white cells using prefixes
-    allBlackCellNamesOut = []
-    allWhiteCellNames = []
-    for name in allBlackCellNames:
-        allBlackCellNamesOut.append(prefixb+name)
-        allWhiteCellNames.append(prefixw+name)
+    #generate cell names for all black and white cells
+    allBlackCellNamesOut = [prefixb+name for name in allBlackCellNames]
+    allWhiteCellNames = [cell.cell_name for cell in allWhiteCells]
 
     #map input black cellname to output black cellname (for gds debugging).
-    blackmap = {old:new for old, new in zip(allBlackCellNames, allBlackCellNamesOut)}
+    blackmap = {black:newblack for black, newblack in zip(allBlackCellNames, allBlackCellNamesOut)}
     #map white cellname to black cellname
     whitemap = {white:black for white, black in zip(allWhiteCellNames, allBlackCellNames)}
-    if infolevel > 0:
-        print('mapping cell->black:')
-        pprint.pprint(blackmap)
-        print('mapping white->black cells:')
-        pprint.pprint(whitemap)
+
+    if infolevel > 1:
+        print('\nMapping for renaming black cells:')
+        pprint(blackmap)
+        print('\nMapping to copy white cellnames to original (black) gdsin cellnames:')
+        pprint(whitemap)
+        #print('\n')
 
     #Export all white cells into the <whitelibrary> gds file
-    #TODO: use whitemap in export:
     nd.export_gds(allWhiteCells, filename=whitelibrary)
+
     # rename black cells:
     g = nd.GDSII_stream(whitelibrary, cellmap=blackmap)
     g.GDSII_write(whitelibrary)
+
     # rename white cells into original black cell names:
-    g = nd.GDSII_stream(whitelibrary, cellmap=whitemap)
-    g.GDSII_write(whitelibrary)
+    #g = nd.GDSII_stream(whitelibrary, cellmap=whitemap)
+    #g.GDSII_write(whitelibrary)
 
     #white to black cell name map:
-    w2b = dict(zip(blackmap.keys(), blackmap.keys()))
-    return whitelibrary, w2b
+    b2w = dict(zip(allBlackCellNames, allWhiteCellNames))
+    return whitelibrary, b2w
 
 
 def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
-        ScellMapping=(None, None), infolevel=0):
+        ScellMapping=None, infolevel=0):
     """Replace black with white cells in <gdsin> and export result to <gdsout>.
 
-    Replacement is Pcell (parametric cell) or Scell (static cell) based.
-    Only apply one mapping per function call, Pcell or Scell, to keep track of
-    the mapping order. Sequential calls are possible.
+    The replacement is Pcell (parametric cell) or a Scell (static cell) based.
+    Note: Only apply one mapping per function call, Pcell *or* Scell,
+    to stay in control of the mapping order, i.e. sequential calls to
+    this function are perfectly fine.
 
-    * Pcells: Needs a mapping of the Pcell basename to a cell function.
-    * Scells: Needs a gds library <ScellFile> and a map <ScellMap>
+    * Pcell replacement: Needs a mapping of the Pcell basename to a cell function:
+        {<black_cell_basename>, <white_cell_function_pointer>}
+    * Scell replacement: Needs a gds library <ScellFile> and a map <ScellMap>:
         * ScellFile (str): filename of gds library
         * ScellMap (dict): {black_cellname: white_cellname}.
 
@@ -196,7 +218,7 @@ def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
         gdsin (str): input filename
         gdsout (str): optional output filename
         PcellMap (dict): black2white dictionary {black_cellbasename: white_Pcell_function}
-        ScellMapping ((str, dict)): (<ScellFile>, <ScellMap>) for black2white mapping
+        ScellMapping (dict): {<ScellFile>: {<ScellMap>}) for black2white mapping across libs
         infolevel (int): amount of debug info printed
 
     Returns:
@@ -208,26 +230,26 @@ def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
         gdsout = "{}_white_{}.gds".format(gdsin[:-4], timestr)
 
     if PcellFunctionMap is not None:
-        whitePcellLibname, PcellMap = __createWhitePcellLib(gdsin,
-            black2whiteMap=PcellFunctionMap, infolevel=infolevel)
+        whitePcellLibname, PcellMap =\
+            __createWhitePcellLib(gdsin, black2whiteMap=PcellFunctionMap,
+                infolevel=infolevel)
         whitePcellstream = nd.GDSII_stream(whitePcellLibname)
         whitePcells = Counter(whitePcellstream.cells.keys())
-        print("...created white Pcell gds library '{}'".format(whitePcellLibname))
-        print("...cellmap: '{}'")
-        pprint.pprint(PcellMap)
+        print("\nCreated white Pcell gds library '{}'".format(whitePcellLibname))
+        #print("cellmap library-to-gdsout:")
+        #pprint(PcellMap)
     else:
         whitePcells = Counter([])
 
-    ScellFile, ScellMap = ScellMapping
-    if ScellMap is None:
+    #ScellFile, ScellMap = ScellMapping
+    if ScellMapping is None:
         ScellMap = []
-
-    if ScellFile is not None:
-        whiteScellstream = nd.GDSII_stream(ScellFile)
-        whiteScells = Counter(whiteScellstream.cells.keys())
-    else:
         whiteScells = Counter([])
-
+    else:
+        for libfile, mapping in ScellMapping.items():
+            whiteScellstream = nd.GDSII_stream(libfile)
+            whiteScells = Counter(whiteScellstream.cells.keys())
+            ScellMap = mapping
 
     gdsinstream = nd.GDSII_stream(gdsin)
     gdsincells = Counter(gdsinstream.cells.keys())
@@ -236,10 +258,13 @@ def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
         print("Use only Pcells or Scells in one call.")
         return None
 
+    #Rename pcells and scells for common post-processing code.
     if len(whiteScells) > 0:
         whiteCells = whiteScells
         whiteCellstream = whiteScellstream
         cellMap = ScellMap
+        print("scell libary '{}'".format(libfile))
+        #TODO: construct single map from all scell libs.
     elif len(whitePcells) > 0:
         whiteCells = whitePcells
         whiteCellstream = whitePcellstream
@@ -252,8 +277,8 @@ def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
     replace = {}
     noreplace = {}
     for Bname, Wname in cellMap.items():
-        if Bname in gdsincells:
-            if Wname in whiteCells:
+        if Bname in gdsincells.keys():
+            if Wname in whiteCells.keys():
                 #print("{} -> {}".format(Bname, Wname))
                 replace[Bname] = Wname
             else:
@@ -266,17 +291,22 @@ def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
     stay = list(gdsincells - Counter(replace.keys()))
     #list any unmapped gdsin names in conflict with new cell names after map?
     stayNOTOK = list( (Counter(stay) & Counter(replace.values())).elements())
-    stayOK = list(Counter(stay)-Counter(stayNOTOK))
+    stayOK = list(Counter(stay) - Counter(stayNOTOK))
 
-    print('Validated mapping(s):')
-    pprint.pprint(replace)
+    if infolevel > 0:
+        print('\nValidated replacement(s) black_gdsin_cell -> white_library_cell:')
+        pprint(replace)
     if len(noreplace) > 0:
-        print('Invalid mapping(s) removed:')
-        pprint.pprint(noreplace)
+        print('\nError: Invalid replacement(s) not executed:')
+        pprint(noreplace)
+    else:
+        if infolevel > 0:
+            print('\nVery good! No invalid cell replacement(s)')
+
     #print('gdsin cell(s) with name conflict:')
-    #pprint.pprint(stayNOTOK)
+    #pprint(stayNOTOK)
     #print('untouched gdsin cell(s):')
-    #pprint.pprint(stayOK)
+    #pprint(stayOK)
 
     #create cellmap for gdsinstream and read gds again.
     #TODO: in mem
@@ -288,12 +318,12 @@ def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
     #print("cellmap:\n", cellmap)
 
     #print('untouched gdsin cells including renamed ones:')
-    #pprint.pprint(stayOK)
+    #pprint(stayOK)
 
     del(gdsinstream)
     gdsinstream = nd.GDSII_stream(gdsin, cellmap=cellmap)
     #print("topcells:")
-    #pprint.pprint(gdsinstream.topcell())
+    #pprint(gdsinstream.topcell())
 
 #==============================================================================
 # Replace cells
@@ -324,14 +354,14 @@ def replaceCells(gdsin, gdsout=None, PcellFunctionMap=None,
         #for cellname in whitePcells:
         #    f.write(whitePcellstream.GDSII_stream_cell(cellname))
 
-       # for Bname, Wname in replace.items():
-       #     f.write(whiteScellstream.GDSII_stream_cell(Wname))
+        # for Bname, Wname in replace.items():
+        #     f.write(whiteScellstream.GDSII_stream_cell(Wname))
 
-       # for cellname in stayOK:# gdsinstream.cells.keys():
-       #     f.write(gdsinstream.cells[cellname].stream)
+        # for cellname in stayOK:# gdsinstream.cells.keys():
+        #     f.write(gdsinstream.cells[cellname].stream)
 
         f.write(gdsinstream.footer.stream)
 
-    print("...Wrote white gds file '{}'".format(gdsout))
+    print("Wrote white gds file '{}'".format(gdsout))
 
     return gdsout

@@ -63,12 +63,14 @@ def Tp_SOA(
             nd.Pin(name='c0', xs=xs['c0'], width=pinwidth['c0']).put(length/2, dy_io, 90)
 
             if pads:
-                width = padwidth
+                bb_width = padwidth
+            else:
+                bb_width = width
 
             pdk.put_stub(['a0', 'b0', 'c0'])
-            pdk.put_boundingbox('org', length, width, align='lb')
+            pdk.put_boundingbox('org', length, bb_width, align='lb')
             if icon:
-                icon(length, width).put(0, 0, 180, 'lc')
+                icon(length, bb_width).put(0, 0, 180, 'lc')
             cfg.cp = C.pin['b0']
         return C
     return cell

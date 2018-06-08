@@ -171,7 +171,7 @@ def Tp_icon_rounded_pad(bufx=None, bufy=None, layer=None):
         length, width, bufx, bufy = calc_buf(length, width, bufx, bufy)
         with nd.Cell('icon', instantiate=False) as icon:
             pad = geom.rounded_rect(
-                length=length, height=width, position='5')
+                length=length, height=width, position=5)
             nd.Polygon(layer=layer, points=pad).put(0)
             nd.Pin('cc').put(0)
         return icon
@@ -249,8 +249,8 @@ def Tp_icon_diode(layer=None):
         with nd.Cell('icon', instantiate=False) as icon:
             dio1 = [(-0.5*ratio*width, 0.5*ratio*width),
                     (0.5*ratio*width, 0.5*ratio*width), (0, -0.5*ratio*width)]
-            dio2 = geom.rectangle(ratio*width, w_line, position='5')
-            dio3 = geom.rectangle(w_line, width, position='5')
+            dio2 = geom.rectangle(ratio*width, w_line, position=5)
+            dio3 = geom.rectangle(w_line, width, position=5)
             nd.Polygon(points=dio1, layer=layer).put(0.5*length)
             nd.Polygon(points=dio2, layer=layer).put(0.5*length, -0.5*ratio*(width-w_line))
             nd.Polygon(points=dio3, layer=layer).put(0.5*length)
@@ -286,16 +286,16 @@ def Tp_icon_diode_gsg(layer=None):
                 (0.5*ratio*height, 0.5*ratio*height), (0, -0.5*ratio*height)]
             diode_triangle =  nd.Polygon(points=outline, layer=layer)
 
-            outline = geom.rectangle(ratio*height, w_line, position='5')
+            outline = geom.rectangle(ratio*height, w_line, position=5)
             diode_base =  nd.Polygon(points=outline, layer=layer)
 
             outline = geom.ring(radius=radius, width=w_line, N=20)
             ring = nd.Polygon(points=outline, layer=layer)
 
-            outline = geom.rectangle(w_line, height, position='5')
+            outline = geom.rectangle(w_line, height, position=5)
             pole = nd.Polygon(points=outline, layer=layer)
 
-            outline = geom.rectangle(2*pitch, w_line, position='5')
+            outline = geom.rectangle(2*pitch, w_line, position=5)
             gnd = nd.Polygon(points=outline, layer=layer)
 
             # put shapes
@@ -340,7 +340,7 @@ def Tp_icon_grating(layer=None):
             N = int(length/(2*w))
 
         with nd.Cell('icon', instantiate=False) as icon:
-            rec = geom.rectangle(w, h, position='5')
+            rec = geom.rectangle(w, h, position=5)
 
             for i in range(N):
                 nd.Polygon(points=rec, layer=layer).put(0+i*w*2)

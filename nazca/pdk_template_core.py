@@ -23,16 +23,39 @@
 import os
 from collections import OrderedDict
 import inspect
-import operator
 from functools import wraps
-import hashlib
-import matplotlib.pyplot as plt
-
 import pandas as pd
+import matplotlib.pyplot as plt
+import json
+from pprint import pprint
+
+import hashlib
 import nazca as nd
 from nazca import cfg
-from nazca.util import parameters_to_string
+#from nazca.util import parameters_to_string
 import nazca.geometries as geom
+
+
+#put here to avoid loading utils
+def parameters_to_string(param):
+    """Create a string from a parameter dictionary.
+
+    param (dict): (parameter_name, value)
+
+    Format:
+
+    "Parameters:
+    <parameter> = <value>
+    <parameter> = <value>
+    ..."
+
+    Returns:
+        str: parameters as a string
+    """
+    plist = ['Parameters:']
+    for key, value in param.items():
+        plist.append("{} = {}".format(key, value))
+    return '\n'.join(plist)
 
 
 #==============================================================================
@@ -43,51 +66,15 @@ _hash_params = {}
 _hash_name = 'NONAME'
 cfg._hashme = []
 
+
 def hashme(*params):
     """Parametrize the decorator to send base name and parameter names.
 
     Returns:
         decorator
     """
-    #print('params:' , params)
-    Npar = len(params)
-    if Npar == 0:
-        print('warning: no name given to @hashme')
-        name = 'NONAME'
-    else:
-        name = params[0]
-        params = params[1:]
-    def decorator(cellfunc):
-        """Decorator for grabbing and hashing a function's full parameter list.
 
-        While executing the wrapper a global hashid and parameter list are set.
-        Before leaving the wrapper the hashid is reset to None.
-
-        Returns:
-            function: wrapper function
-        """
-        @wraps(cellfunc)
-        def wrapper(*args, **kwargs):
-            global _hash_id
-            global _hash_params
-            global _hash_name
-            nonlocal name
-
-            hash_length = 4
-            name_long = name
-            getargs = inspect.getargspec(cellfunc)
-            funcargs = getargs.args
-            funcdefaults = getargs.defaults
-            hashstr = ''
-            _hash_params = OrderedDict()
-
-            if funcargs:
-                # also make it work for class methods by removing 'self':
-                skip = 0
-                if funcargs[0] == 'self':
-                    skip = 1
-                    funcargs = funcargs[1:]
-                    print(
+    hash_class_warning =\
 """Warning: @hashme decorator on Class method:
 
 By default Nazca will guarantee a unique cell name each time a cell is created.
@@ -134,7 +121,48 @@ Use this variable to put instances of the cells:
     E = elm.cell(a, b, c)
     E.put()
     E.put()
-""")
+"""
+
+    #print('params:' , params)
+    Npar = len(params)
+    if Npar == 0:
+        print('warning: no name given to @hashme')
+        name = 'NONAME'
+    else:
+        name = params[0]
+        params = params[1:]
+
+    def decorator(cellfunc):
+        """Decorator for grabbing and hashing a function's full parameter list.
+
+        While executing the wrapper a global hashid and parameter list are set.
+        Before leaving the wrapper the hashid is reset to None.
+
+        Returns:
+            function: wrapper function
+        """
+        @wraps(cellfunc)
+        def wrapper(*args, **kwargs):
+            global _hash_id
+            global _hash_params
+            global _hash_name
+            nonlocal name
+
+            hash_length = 4
+            name_long = name
+            getargs = inspect.getargspec(cellfunc)
+            funcargs = getargs.args
+            funcdefaults = getargs.defaults
+            hashstr = ''
+            _hash_params = OrderedDict()
+
+            if funcargs:
+                # also make it work for class methods by removing 'self':
+                skip = 0
+                if funcargs[0] == 'self':
+                    skip = 1
+                    funcargs = funcargs[1:]
+                    print(hash_class_warning)
 
                 for i, (a, v) in enumerate(zip(funcargs, funcdefaults)):
                     try: # set to kwargs
@@ -151,7 +179,7 @@ Use this variable to put instances of the cells:
                 for p in params:
                     if p in _hash_params.keys():
                         if isinstance(_hash_params[p], float):
-                            #avoid things like 0.0000000001 in names.
+                            #avoid formats like 0.0000000001 in names.
                             name_long += "_{:.5f}".format(_hash_params[p]).rstrip('0').rstrip('.')
                         else:
                             name_long += "_{}".format(_hash_params[p])
@@ -168,15 +196,30 @@ Use this variable to put instances of the cells:
             # add cfg version to avoid importing template_core for hashme attributes
             cfg.hash_id = _hash_id
             cfg.hash_params = _hash_params
-            cfg.hash_basename = cfg.gds_cellname_cleanup(name)         # base
+            basename = cfg.gds_cellname_cleanup(name)
+            cfg.hash_basename = basename                               # base
             cfg.hash_paramsname = cfg.gds_cellname_cleanup(name_long)  # base + params
             cfg.hash_name = cfg.gds_cellname_cleanup(_hash_name)       # base + params + hash
+            cfg.hash_func_id = id(cellfunc)
+
+            # check if basename comes from a unique function:
+            try:
+                funcid = cfg.basenames[basename]
+                if funcid != cfg.hash_func_id:
+                    print("ERROR: Reusing a basename across functions: '{}'".\
+                        format(basename))
+            except:
+                if cfg.validate_basename:
+                    nd.validate_basename(basename)
+                # add basename:
+                cfg.basenames[basename] = cfg.hash_func_id
 
             cell_exists = _hash_name in cfg.cellnames.keys()
+
             if cell_exists:
                 return cfg.cellnames[_hash_name]
             else:
-               cell_new = cellfunc(*args, **kwargs)
+                cell_new = cellfunc(*args, **kwargs)
 
             #reset:
             _hash_id = None
@@ -187,16 +230,38 @@ Use this variable to put instances of the cells:
             cfg.hash_basename = ''
             cfg.hash_paramsname = ''
             cfg.hash_name = ''
+            cfg.hash_func_id = None
             return cell_new
         return wrapper
     return decorator
 
 
+def get_Cell(name):
+    """Get Cell object by providing cell name.
+
+    Args:
+        name (str): cell name
+
+    Returns:
+        Cell: cell having cellname <name>
+    """
+
+    if name in cfg.cellnames.keys():
+        return cfg.cellnames[name]
+    else:
+        raise Exception("Error: Requested cell with name '{}' not existing."\
+            "Availabe are: {}.".format(name, sorted(cfg.cellnames.keys())))
+
+
 def rangecheck(allowed_values):
     """Check if parameter values are in range.
 
+    A dictionary with the allowed values for parameters is sent to rangecheck.
+    If any parameter is out of range, a ValueError will be raised and relevant
+    error info is provided to solve the issue.
+
     Args:
-        allowed values (dict): {str: tuple} as {var_name: (low, var_value, high)}
+        allowed_values (dict): {str: tuple} as {'<var_name>': (low, <var_name>, high)}
 
     Raises:
         ValueError if out of range.
@@ -206,13 +271,17 @@ def rangecheck(allowed_values):
 
     Example:
 
-        check 0 <= a <= 10 and -5 <= b <= 5::
+        Add a check in function `func` on 0 <= a <= 10 and -5 <= b <= 5.
+        The call `func(a=100, b=100)` will raise a Value error::
 
             def func(a, b):
-                nd.rangecheck({
-                    'a', (0, a, 10),
-                    'b', (-5, a, 5)
-                })
+                nd.rangecheck({'a': (0, a, 10), 'b': (-5, b, 5)})
+
+            func(a=100, b=100)
+
+            # output:
+            # ValueError: a=100 too large. Allowed values: 0<=a<=10
+            # b=100 too large. Allowed values: -5<=b<=5
     """
     err = ''
     for var, (low, value, high) in allowed_values.items():
@@ -226,35 +295,35 @@ def rangecheck(allowed_values):
                  format(var, low, high, value)
     if err != '':
         raise ValueError(err)
-    return err
+    return None
 
 #==============================================================================
 #
 #==============================================================================
-stubs = dict() # All stubs. {stub_name: stub_cell_obj}
-stubmap = dict() # Map xs to its stub_xs. {xs_name: stub_xs_name}
-
+stubs = dict() # dict of all stubs. {stub_name: stub_cell_obj}
+stubmap = dict() # dict of xsection_name to its stub's xsection_name. {xs_name: stub_xs_name}
 
 class Functional_group():
-    """
-    Class to group building blocks syntactically together.
+    """Class to group building blocks syntactically together.
 
-    e.g. a bb_splitters group with various splitter components:
+    Example:
+        Create bb_splitters group with various splitter components
+        such that the mmi can be found under bb_splitters.<tab>::
 
-        bb_splitters.mmi1x2
-
-        bb_splitters.mmi2x2
-
-        bb_splitters.mmi3x3
+            bb_splitters = Functional_group()
+            bb_splitters.mmi1x2 = mmi1x2
+            bb_splitters.mmi2x2 = mmi2x2
+            bb_splitters.mmi3x3 = mmi3x3
     """
 
     def __init__(self, name=''):
+        """Create a Functional group object."""
         self.name = name
 BB_Group = Functional_group
 
 
 def parameters(parameters=None):
-    """Put parameter list as annotation in a building block.
+    """Put a parameter list as annotation in a building block.
 
     Args:
         parameters (dict): {parameter_name: value}
@@ -279,15 +348,16 @@ def parameters(parameters=None):
 
 
 def cellname(cellname=None, length=0, width=None, align='lc'):
-    """Create text of the cellname and position current pin to place it.
+    """Create the cellname as a text cell.
 
     Args:
         cellname (str): name of the cell
         length (float): length available for the BB name in um
+        width (float):
         align (str): text alignment (see nazca.text, default = 'lc')
 
     Returns:
-        Cell: text with cellname formated
+        Cell: text with cellname
     """
     cell = cfg.cells[-1]
     if cellname is None:
@@ -320,7 +390,6 @@ def addBBmap(name, params=(), trans=(0, 0, 0)):
     if not isinstance(params, tuple):
         params = (params,)
 
-
     #get the right row for <name>:
     mapping = cfg.bbmap.loc[cfg.bbmap['Nazca'] == name]
 
@@ -341,58 +410,55 @@ def addBBmap(name, params=(), trans=(0, 0, 0)):
     cfg.cells[-1].BBmap = (od_name, od_port, (odx, ody, oda), (x, y, a), trans, params)
 
 
-
 #==============================================================================
 # Stubs
 #==============================================================================
-arrow = None
-
 #@hashme('arrow', 'layer', 'pinshape', 'pinshape')
-# Do not @hashme this function (autoname) this function
-# as parameter values are finalized inside the function.
-def make_pincell(layer=None, pinshape=None, pinsize=None):
-    """Create a cell with an arrow shape to indicate pin positions.
+# Do NOT @hashme this function,
+# because parameter values are finalized inside the function.
+def make_pincell(layer=None, shape=None, size=None):
+    """Create a cell to indicate a pin position.
+
+    The cell contains a shape, e.g. an arrow, to point out a location in the layout.
+    Available pin shapes are in a dictionary in cfg.pinshapes: {name: polygon}.
+    The predefined shapes have been normalized to unit size.
 
     Args:
-        layer (float): layer number to place the arrow
-        arrowtype (str): geometry type of the arrow: full | lefthalf | righthalf
+        layer (float): layer number to place the pin symbol/shape
+        shape (str): name (dict key) of the pin symbol/shape.
+        size (float): scaling factor of the pin symbol/shape
 
     Returns:
-        None
+        Cell: cell with pin symbol
     """
-    pinshape_default = 'arrow_full'
+    pinshape =  cfg.pin_settings['bb_pin_shape']
     if layer is None:
-        layer = 'bb_pin'
+        layer = cfg.pin_settings['bb_pin_layer']
+    layer = nd.get_layer(layer)
 
-    if layer not in cfg.layerdict.keys():
-        try:
-           layer = cfg.default_layer_Annotation
-           nd.add_layer(name=layer, layer=layer)
-        except:
-            pass
+    if shape is None:
+        shape = pinshape
 
-    if pinshape is None:
-        pinshape = pinshape_default
+    if size is None:
+        size = cfg.pin_settings['bb_pin_size']
 
-    if pinsize is None:
-        pinsize = cfg.bb_pin_size
+    if shape not in cfg.pinshapes.keys():
+        print("Warning: arrowtype '{}' not recognized.".format(shape))
+        print("Available options are: {}.".format(cfg.pinshapes.keys()))
+        print("Fall back type '{}' will be used.".format(pinshape))
+        shape = pinshape
 
-    if pinshape not in cfg.pinshapes.keys():
-        print("Warning: arrowtype '{}' not recognized.".format(pinshape))
-        print("Available options are {}.".format(cfg.pinshapes))
-        print("I will use arrowtype = '{}'.".format(pinshape_default))
-        pinshape = pinshape_default
-
-    name = "{}_{}_{}_{}".format('arrow', layer, pinshape, pinsize)
-    if name in cfg.cellnames:
+    name = "{}_{}_{}_{}".format('arrow', layer, shape, size)
+    name = cfg.gds_cellname_cleanup(name)
+    if name in cfg.cellnames.keys():
         return cfg.cellnames[name]
-    with nd.Cell(name) as arrow:
-        outline = [(x*pinsize, y*pinsize) for x, y in cfg.pinshapes[pinshape]]
+    with nd.Cell(name, instantiate=cfg.pin_instantiate) as arrow:
+        outline = [(x*size, y*size) for x, y in cfg.pinshapes[shape]]
         nd.Polygon(layer=layer, points=outline).put(0)
     return arrow
 
 
-def stubname(xs, width, thick, shape=None, size=None):
+def stubname(xs, width, thick, stubshape=None, pinshape=None, pinsize=None, pinlayer=None):
     """Construct a stub name.
 
     Args:
@@ -406,29 +472,38 @@ def stubname(xs, width, thick, shape=None, size=None):
     if width is None:
         return 'stub_{}'.format(xs)
     else:
-        name = 'stub_{}_w{}_t{}_{}'.format(xs, width, thick, shape, size)
+        name = 'stub_{}_w{}_t{}_{}_{}_s{}_l{}'.\
+            format(xs, width, thick, stubshape, pinshape, pinsize, pinlayer)
         return cfg.gds_cellname_cleanup(name)
 
 
 missing_xs = []
-def makestub(xs_guide, width, length=2.0, shape=None, pinshape=None, pinsize=None, cell=None):
-    """Factory for creating stubs in the logical layers.
+def _makestub(xs_guide=None, width=0, length=2.0, shape=None, pinshape=None,
+        pinsize=None, pinlayer=None, cell=None):
+    """Create a stub in the logical layers.
+
+    A stub is the stub of a xsection shape around a pin to visualize a connection.
+    A pincell is added to the stub to indicate the pin position inside the stub.
+    The new stub is added to the stubs dictionary: {name: stubcell}
 
     Args:
         xs_guide (str): name of xsection
         width (float): stub width
         thick (float): thickness of stub into cell (length)
-        shape (str): shape of the stub: circ | rect (default = 'rect')
+        shape (str): shape of the stub: 'box' | 'circ' (default = 'box')
+        pinshape (string): pinshape used in the stub
+        pinsize (float): scaling factor of the pinshape (default = 1)
+        cell (Cell): use the provided cell as stub instead of creating a new stub cell
 
     Returns:
-        None
+        str: name of the stub
     """
-    arrow = make_pincell(pinshape=pinshape, pinsize=pinsize)
     try:
         xs_logic = cfg.stubmap[xs_guide]
     except:
         # if no stub defined, use the xs as its own stub.
         if xs_guide is None:
+            arrow = make_pincell(layer=pinlayer, shape=pinshape, size=pinsize)
             return arrow
 
         if xs_guide not in cfg.XSdict.keys():
@@ -438,24 +513,29 @@ def makestub(xs_guide, width, length=2.0, shape=None, pinshape=None, pinsize=Non
                    "  Possible causes: '{0}' is misspelled or not yet defined.\n"\
                    "  Will use xsection '{2}' instead and continue.\n"
                    "  To define a new xsection:\n"\
-                   "  add_xsection(name='{0}')\n"\
+                   "      add_xsection(name='{0}')\n"\
                    "  or with layers info and adding a custom stub:\n"\
-                   "  add_xsection(name='{0}', layer=1)\n"\
-                   "  add_xsection(name='{1}', layer=2)\n"\
-                   "  add_stub(xsection='{0}', stub='{1}')".\
+                   "      add_xsection(name='{0}', layer=1)\n"\
+                   "      add_xsection(name='{1}', layer=2)\n"\
+                   "      add_stub(xsection='{0}', stub='{1}')".\
                        format(xs_guide, 'stubname', cfg.default_xs_name))
                 xs_guide = cfg.default_xs_name
 
         cfg.stubmap[xs_guide] = xs_guide
         xs_logic = xs_guide
 
+    name = stubname(xs_guide, width, length, shape, pinshape, pinsize, pinlayer)
+    if name in stubs.keys():
+        return name
+
+    # make a new stub:
     stubshapes = ['box', 'circle']
-    name = stubname(xs_guide, width, length, shape, pinsize)
+    arrow = make_pincell(layer=pinlayer, shape=pinshape, size=pinsize)
 
     if width is None:
         width = 0
 
-    with nd.Cell(name) as C:
+    with nd.Cell(name, instantiate=cfg.stub_instantiate) as C:
         arrow.put(0)
 
         if cell is not None:
@@ -475,26 +555,35 @@ def makestub(xs_guide, width, length=2.0, shape=None, pinshape=None, pinsize=Non
     return name #name can have change to default_xs
 
 
-def put_stub(pinname=None, length=2.0, shape='box', pinshape=None, pinsize=1.0,
-        layer=None, annotation_layer=None):
-    """Add a xsection stub to a pin.
+def put_stub(pinname=None, length=None, shape='box', pinshape=None, pinsize=None,
+        pinlayer=None, pinshow=True, annotation_layer=None):
+    """Add a xsection stub to a pin or multiple pins.
 
-    The xsection and width of the stub is obtained from the pin attributes.
+    The xsection and width of the stub is obtained from its pin attributes.
+    If no attributes are set, the stub layers are empty and the stubcell
+    only contains the pincell.
 
     Args:
-        pinname (str | list of str): name(s) of the pin(s) (default = None)
-            If pinname is None all the chained pins will obtain a stub.
+        pinname (str | list of str | None): name(s) of the pin(s) (default = None)
+            For pinname=None (default) all chained pins will obtain a stub.
         length (float): length of the stub (thickness into cell)
+        shape (string): shape of the stub 'box' | 'cirlce' (default = 'box')
+        pinshape (string): pinshape used in the stub
+        pinsize (float): scaling factor of the pinshape (default = 1)
+        layer (str | int | (int, int)): pin layer
+        annotation_layer (str | int | (int, int)): annotation layer
 
     Returns:
         None
     """
-
     if isinstance(pinname, str):
         pinname = [pinname]
 
     if isinstance(pinname, nd.Node):
         pinname = [pinname.name]
+
+    if length is None:
+        length = cfg.pin_settings['stub_length']
 
     if isinstance(shape, nd.Cell):
         stubcell = shape
@@ -504,71 +593,123 @@ def put_stub(pinname=None, length=2.0, shape='box', pinshape=None, pinsize=1.0,
 
     if pinname is None or pinname == []:
         #raise ValueError('pinname requries a string name of the pin or list of string names.')
-        pinname = [name for name, pin in cfg.cells[-1].pin.items() if pin.chain == 1]
+        pinname = [name for name, pin in cfg.cells[-1].pin.items()
+            if pin.chain == 1]
 
     if pinshape is None:
-        pinshape = cfg.bb_pin_shape
+        pinshape = cfg.pin_settings['bb_pin_shape']
+
+    try:
+        float(length)
+    except:
+        raise ValueError("length in 'put_stub' needs to be a number not '{}' of type {}".format(length, type(length)))
 
     if annotation_layer is None:
-        annotation_layer = 'bb_pin_text'
+        annotation_layer =  cfg.pin_settings['bb_pin_annotation_layer']
 
     for p in pinname:
         cell = cfg.cells[-1]
         try:
             node = cell.pin[p]
-            if node.xs is None:
-                xs = None
-                width = 0
-            else:
-                xs = node.xs
-                width = node.width
-
-            node.show = True #display pin name in layout
-            if xs is None:
-                arrow = make_pincell(pinshape=pinshape, pinsize=pinsize, layer=layer)
-                arrow.put(node)
-            else:
-                name = stubname(xs, width, length, shape, pinsize)
+            node.show = pinshow #display pin name in layout and fingerprint
+            if stubcell is not None:
+                node.show = pinshow #display pin name in layout and fingerprint
+                name = "stub_{}".format(shape)
                 if name not in stubs.keys():
-                    name = makestub(xs_guide=xs, width=width, length=length,
-                        shape=shape, pinshape=pinshape, cell=stubcell)
+                    stubs[name] = stubcell
                 stubs[name].put(node)
+            else:
+                if node.xs is None:
+                    xs = None
+                    width = 0
+                else:
+                    xs = node.xs
+                    width = node.width
 
-                # Move the annotation a bit so it is inside the arrow and the labels of
-                # connected pins can be distinguished.
-                #TODO: 0.3 should be parametrized.
+                node.show = True #display pin name in layout and fingerprint
+                if xs is None: # pincell only
+                    arrow = make_pincell(layer=pinlayer, shape=pinshape, size=pinsize)
+                    arrow.put(node)
+                else:
+                    name = _makestub(xs_guide=xs, width=width, length=length,
+                        shape=shape, pinshape=pinshape, pinsize=pinsize,
+                        pinlayer=pinlayer)
+                    stubs[name].put(node)
 
-            nd.Annotation(layer=annotation_layer, text=p).put(node.move(-0.3))
-        except:
-            print("warning (core): can't add stub in cell '{}': pin '{}' not existing".\
+            # Move the annotation for readability
+            nd.Annotation(layer=annotation_layer, text=p).\
+                put(node.move(*cfg.pin_settings['bb_pin_annotation_move']))
+        except Exception as E:
+            print("warning (core): can't add stub in cell '{}' on pin '{}'. ".\
                 format(cell.cell_name, p))
+            raise
+
+def set_pdk_pinstyle(pin_settings):
+    keys = nd.cfg.pin_settings.keys()
+
+    if pin_settings is not None:
+        for item, setting in pin_settings.items():
+            if item in keys:
+                nd.cfg.pin_settings[item] = setting
+            else:
+                print("Warning: key '{}' not in pin_settings. Available keys: {}".\
+                    format(item, keys))
+
+    overrule = nd.cfg.overrule_pdk_pinstyle
+    if overrule is not None:
+        for item, setting in overrule.items():
+            if item in keys:
+                nd.cfg.pin_settings[item] = setting
+            else:
+                print("Warning: key '{}' not in pin_settings. Available keys: {}".\
+                    format(item, keys))
+        #reset after use:
+        nd.cfg.overrule_foundry_pinstyle = None
 
 
-def make_pdk_lists(functioncalls):
-    """Create a list of Cell and a dictionary of function calls strings.
+def export_bb2png(cellcalls, path='', close=True, bbox_pins=True):
+    """Create png image for all cells in <cellcalls>.
+
+    Only the Cell objects are used from <cellcalls>, but it does accept as well
+    the dict as needed in method 'bb_fingerprint'.
+
+    cellcalls (dict | list of Cells): All the cells {function_call_str: cell_from_call} | list of Cells
+    close (bool): close cell immediately after drawing (default = True)
+    path (str): path for saving png files
+    bbox_pins (bool): add pins to the bbox (default = True)
 
     Returns:
-        list, Dict: list of Cell, dict of {Cell, functioncall_ string}
+        None
     """
-    BBcells = [] # list with all BBs to show in the manual
-    BBdict = {} # dictionary for bbfingerprint.
-    for F in functioncalls:
-        BBcells.append(eval(F))
-        #BBfunc_truncs.append(F[:F.index('(')])
-        BBdict[BBcells[-1]] = F
-    return BBcells, BBdict
+    export = True
+
+    if isinstance(cellcalls, dict):
+        cells = cellcalls.values()
+    else:
+        cells = cellcalls
+
+    N = len(cells)
+
+    for i, cell in enumerate(cells):
+        print('{}/{}'.format(i+1, N))
+        bbox_stubs_store = cfg.bbox_stubs
+        cfg.bbox_stubs = bbox_pins
+        if export:
+            output = 'file'
+        else:
+            output = None
+        nd.export_plt(cell, output=output, path=path,
+            title=cell.cell_paramsname)
+        cfg.bbox_stubs = bbox_stubs_store
+        plt.close("all")
+    return None
 
 
-def bb_fingerprint(cellcall, export_png=False, path='', \
-        bbox_stubs=True, close_plt=True):
+def bb_fingerprint(cellcalls, save=False, filename='fingerprint.json', infolevel=0):
     """Generate a dict with parameter list and pin list of a list off BBs.
 
     Args:
-        functioncall (list of str): function calls to fingerprint
-        export_png (bool): generate png output and save in <path>
-        path (str): path for saveing png files
-        bbox_stubs (bool): add stubs to the bbox (default = True)
-            Only relevant with export_png True
+        cellcalls (dict): All the cells {function_call_str: cell_from_call}
 
     Returns:
         dict: Dictionary with building block info, Structure is as follows::
@@ -595,45 +736,46 @@ def bb_fingerprint(cellcall, export_png=False, path='', \
                 }
             }
     """
-    BBsettings = {}
-    cellcallsorted = sorted(cellcall.items(), key=operator.itemgetter(1))
-    #print('sorted:', cellcallsorted)
-    for cell, callstr in cellcallsorted:
+    fingerprint = {}
+    cellcallsorted = sorted(cellcalls.items()) #not effective for Python with scrambled dict.
+    for callstr, cell in cellcallsorted:
         try:
             groupname = cell.groupname
         except:
             groupname = ''
 
-        if export_png:
-            bbox_stubs_store = cfg.bbox_stubs
-            cfg.bbox_stubs = bbox_stubs
-            nd.export_plt(cell, output='file', path=path, title=cell.cell_paramsname)
-            cfg.bbox_stubs = bbox_stubs_store
-
         pinsetting = {}
+        if infolevel > 0:
+            print(cell.cell_basename)
         for name, pin in sorted(cell.pin.items()):
             if name != 'org':
                 pinsetting[name] = {
-                    'width':pin.width,
-                    'xsection':pin.xs,
-                    'pointer':pin.xya(),
-                    'show':pin.show,
-                    'type':pin.type
+                    'width': pin.width,
+                    'xsection': pin.xs,
+                    'pointer': pin.xya(),
+                    'show': pin.show,
+                    'type': pin.type,
+                    'remark': pin.remark
                 }
+                if infolevel > 0:
+                    print(name,  pinsetting[name])
 
         paramsetting = {}
-        try: # parameters may be empty
+        try: # 'parameters' may be empty
             for p in cell.parameters:
                 paramsetting[p] = cell.parameters[p]
         except:
             pass
+
+        #bbox
         try:
             length = cell.length
             width = cell.width
         except:
             length = 'None'
             width = 'None'
-        BBsettings[cell.cell_name] = {
+
+        fingerprint[cell.cell_name] = {
             'pins': pinsetting,
             'parameters': paramsetting,
             'paramsname': cell.cell_paramsname,
@@ -641,10 +783,82 @@ def bb_fingerprint(cellcall, export_png=False, path='', \
             'groupname': groupname,
             'function': callstr,
             'length': length,
-            'width': width}
+            'width': width,
+            'connect': (cell.default_in, cell.default_out)}
 
-        plt.close()
-    return BBsettings
+    if save:
+        with open(filename, 'w') as fp:
+            json.dump(fingerprint, fp, indent=2, sort_keys=True)
+        print("Saved fingerprint to {}".format(filename))
+    if infolevel > 1:
+        pprint(fingerprint)
+    return fingerprint
+
+
+def validate_black_to_white_mapping(black2whiteMap, allBBcells, infolevel=0):
+    """Validate if all white and black boxes are mapped.
+
+    By increasing the infolevel more information will be displayed on where
+    black <-> white mappings are missing.
+
+    Args:
+        black2whiteMap (dict): {blackbox-basename: whitebox-function}
+        allBBcells (list of Cell): all black box cells.
+        infolevel: amount of feedback to stdout (default = 0)
+
+    Returns:
+        bool: True if mapping is successful.
+    """
+
+    if infolevel > 0:
+        print('Validate black <-> white box mappings:')
+
+    okay = True
+    mesg = []
+    #print("\nStatus of white-box implementation:")
+    mappings = ""
+    header = "   {0:30}{1}".format("BASENAME", "FUNCTION")
+    black_in_map = list(black2whiteMap.keys())
+    basenames = {cell.cell_basename: cell for cell in allBBcells}
+    black_count = len(basenames)
+    white_found = 0
+    for basename, cell in sorted(basenames.items()):
+        func = ""
+        defined = '?'
+        if basename in black_in_map:
+            defined = '*'
+            white_found += 1
+            func = black2whiteMap[basename]
+        mappings += "{0}  {1:30}{2}\n".format(defined, basename, func)
+
+    black_orphan_count = black_count - white_found
+    text = ("Found {} black orphans".format(black_orphan_count))
+    print("{}".format(text))
+    if black_orphan_count > 0:
+        okay = False
+        mesg.append(text)
+        if infolevel > 0:
+            print(header)
+            print(mappings)
+
+    white_orphans = set(black2whiteMap) - set(basenames.keys())
+    white_orphan_count = len(white_orphans)
+    text = "Found {} white orphans".format(white_orphan_count)
+    print("{}".format(text))
+    if white_orphan_count > 0:
+        okay = False
+        mesg.append("{}{}".format(text, '.'))
+        if infolevel > 0:
+            print(header)
+            for name in white_orphans:
+                print("?  {:30}{}".format(name, black2whiteMap[name]))
+
+    if not okay:
+        print("\nError(s) found in white <-> black box mappings.")
+        for m in mesg:
+            print("- {}{}".format(m, '.'))
+    else:
+        print("\nSuccesful black <-> white mapping.")
 
 
 bbox_pinnames = [
@@ -656,7 +870,11 @@ bbox_pinnames = [
 
 def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
         align='lc', name=True, params=True, move=(0, 0, 0)):
-    """Create  bounding box (bbox) cell.
+    """Create bounding box (bbox) cell inside the active cell.
+
+    This function places a bbox cell and raises by default the bbox pins into
+    the active cell. The bbox displays a bbox outline (can be switched off).
+    By default it also adds the active cellname and parameters.
 
     Args:
         pin (str): pin to place bbox on (center left of bbox)
@@ -664,9 +882,12 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
         with (float): width of the bbox
         raise_pins (bool): raise bbox pins into active cell (default = True)
         outline (bool): draw bbox outline (default = True)
-        align (str): align the bbox on pin <pinname> (default = 'lc')
+        align (str): align the bbox on the specified bbox pin <pinname> (default = 'lc')
+        name (bool): display the (active) cell name in the bbox. (default = True)
+        params (bool): add parameter annotation to the bbox
+        move (tuple): move the bbox placement by (float, float, float)
 
-    Return:
+    Returns:
         None
     """
     cell = cfg.cells[-1]
@@ -676,7 +897,7 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
         outline = geom.box(length, width)
         nd.Polygon(layer='bbox', points=outline).put(0)
 
-        stbs = cfg.bbox_stubs
+        stbs = cfg.bbox_stubs and outline
         nd.Pin('lb', type='bbox', show=stbs).put(0, -0.5*width, 180)
         nd.Pin('lc', type='bbox', show=stbs).put(0, 0, 180)
         nd.Pin('lt', type='bbox', show=stbs).put(0, 0.5*width, 180)
@@ -697,14 +918,17 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
 
         if stbs:
             nd.put_stub(['lb', 'tl', 'rt', 'br'],
-                pinshape='arrow_righthalf', pinsize=cfg.bbox_pin_size,
-                layer='bbox_pin', annotation_layer='bbox_pin_text')
+                pinshape='arrow_righthalf',
+                pinsize=cfg.pin_settings['bbox_pin_size'],
+                pinlayer='bbox_pin', annotation_layer='bbox_pin_text')
             nd.put_stub(['lt', 'tr', 'rb', 'bl'],
-                pinshape='arrow_lefthalf', pinsize=cfg.bbox_pin_size,
-                layer='bbox_pin', annotation_layer='bbox_pin_text')
+                pinshape='arrow_lefthalf',
+                pinsize=cfg.pin_settings['bbox_pin_size'],
+                pinlayer='bbox_pin', annotation_layer='bbox_pin_text')
             nd.put_stub(['lc', 'tc', 'rc', 'bc'],
-                pinshape='arrow_full', pinsize=cfg.bbox_pin_size,
-                layer='bbox_pin', annotation_layer='bbox_pin_text')
+                pinshape='arrow_full',
+                pinsize=cfg.pin_settings['bbox_pin_size'],
+                pinlayer='bbox_pin', annotation_layer='bbox_pin_text')
 
         if name:
             cellname(cellname=_paramsname, length=length, width=width, align='cc').\
@@ -735,11 +959,18 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
 
 
 def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
-        layermap=None, flip=False, scale=1, stubs=True):
-    """Load a GDS building block and its corresponding pin file.
+        layermap=None, flip=False, scale=1.0, stubs=True, native=True,
+        bbox=False, prefix=''):
+    """Load a gds cell and the corresponding pin info from file.
+
+    This function uses method 'load_gds' for loading the gds file
+    and adds pins and stubs according to the pinfile.
+    The combination creates building block cell with connectivity.
+    Without pinfile method 'load_gds" can be used instead.
 
     If stubs == True then both the stubs and the loaded GDS are instantiated
-    inside the Cell returned by load _gdsBB to keep them in sync under flipping.
+    inside the returned Cell.
+    This to ensure that for this cell the gds and stubs remaind aligned under flipping.
 
     Args:
         gdsfilename (str): gds filename to import from
@@ -748,16 +979,22 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
         newcellname (str): new cell name
         layermap (dict): mapping of layer {number_in: number_out}
         flip (bool): mirror the gds (default = False)
-        scale (float): scaling factor (default = 1), not implemented
+        scale (float): scaling factor (default = 1.0). Use with great care
+            as scaled building blocks will not make much sense from a functional
+            prespective.
+            pin positions will be scaled along with the gds, however,
+            xs information, like 'width' will *not* be scaled
         stubs (bool): place stubs (default = True)
 
     Returns:
-        Cell
+        Cell: Nazca Cell with the loaded gds and (if provided) pins and stubs.
     """
     if stubs:
         instantiate = True
+        bboxgds = False
     else:
         instantiate = False
+        bboxgds = bbox
 
     with nd.Cell(cellname+'_stubs', instantiate=instantiate) as C:
         #TODO: if this is true the instance and gds file may get the same name
@@ -767,9 +1004,16 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
             cellname=cellname,
             newcellname=newcellname,
             layermap=layermap,
-            scale=scale
-            ).put(0, flip=flip)
+            scale=scale,
+            native=native,
+            bbox=bboxgds,
+            prefix=prefix).\
+                put(0, flip=flip)
         #TODO: if the GDS gets flipped as original the pins need to follow
+        if flip:
+            s = -1
+        else:
+            s = 1
         if pinfilename is not None:
             df = pd.read_csv(pinfilename, delimiter= ',', skiprows=1, header=None,
                 names = ['io', 'x', 'y', 'a', 'xs', 'w'])
@@ -785,9 +1029,11 @@ def load_gdsBB(gdsfilename, cellname, pinfilename=None, newcellname=None,
                 if not isinstance(w, float):
                     w = 0.0
 
-                nd.Pin(name=io, xs=xs, width=w).put(x, y, a)
+                nd.Pin(name=io, xs=xs, width=w).put(scale*x, s*scale*y, a)
                 if stubs and xs is not None :
                     put_stub(io)
+        if instantiate and bbox:
+            C.autobbox = True
     return C
 
 
