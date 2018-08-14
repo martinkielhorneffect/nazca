@@ -466,7 +466,7 @@ class GDSII_element:
                 if r.data[0] & 0x8000:
                     strans = 1
             elif r.rtype == gb.GDS_record.MAG:
-                mag = r.data
+                mag = r.data[0]
             elif r.rtype == gb.GDS_record.ANGLE:
                 angle = r.data[0]
 
@@ -486,7 +486,7 @@ class GDSII_element:
         #     <strans: STRANS [MAG] [ANGLE]
         if self.etype != gb.GDS_record.AREF:
             return None
-        sname, strans, mag, angle, col, row, XY = None, None, None, None, None, None, None
+        sname, strans, mag, angle, col, row, XY = None, None, 1.0, None, None, None, None
         for r in self.records[1:]:
             if r.rtype == gb.GDS_record.SNAME:
                 sname= r.data

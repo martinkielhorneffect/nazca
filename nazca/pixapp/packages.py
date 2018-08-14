@@ -341,13 +341,13 @@ class Package1():
         pnpos = pin.name.find('_rf')
         padname = pin.name[pnpos+1:pnpos+6]
         with nd.Cell('RF-pad-'+padname) as C:
-            pad = sp.pad_gsg(length_pad=90, width_pad_sig=70,
+            pad = sp.gsg_pad(length_pad=90, width_pad_sig=70,
                     width_pad_gnd=70, gap2=80+30).put('rc')
             pad.raise_pins()
-            C.default_pins('rc', 'a0')
+            C.default_pins('rc', 'c1')
             txt = '{}\n{}'.format(padname[0:2], padname[2:])
             nd.text(txt, height=30, align='ct', layer=self.textlayer).\
-                    put(pad.pin['a0'].move(-60,0,-90))
+                    put(pad.pin['c1'].move(-7,0,-90))
         return C
 
 

@@ -96,7 +96,7 @@ def trace_length(name=None):
         try:
             L = elm.cnode.cell.length_geo
             length += L
-            #print(trace_id, elm, L)
-        except:
+            #print(name, elm, L)
+        except AttributeError:
             pass
     return length

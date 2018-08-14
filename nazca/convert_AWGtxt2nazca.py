@@ -132,6 +132,8 @@ def put_pins(file, xs, win, wout, warm=None, stubs=False):
             xs = None
         if w.lower() == 'none':
             w = None
+        else:
+            w = float(w)
         Pin(name=name, width=w, xs=xs).put(x, y, a)
         if stubs:
             put_stub(name)

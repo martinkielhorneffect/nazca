@@ -52,7 +52,7 @@ from pprint import pprint
 # keep track of layers used by the designer that have not been defined:
 unknown_layers = set()
 unknown_xsections = set()
-cfg.layerset = set()
+cfg.layerset = set() #set of all (L, D) layers defined
 
 cfg.xsection_table = pd.DataFrame()
 xsection_table_attr = ['xsection', 'xsection_foundry', 'origin', 'stub']
@@ -66,7 +66,7 @@ layer_table_attr_join = ['layer', 'datatype', 'layer_name', 'layer_name_foundry'
 
 #layercolor table:
 cfg.colors = pd.DataFrame()
-
+cfg.xs_list = []
 
 #xsection-layer-map table, mapping layers to xsections:
 cfg.xsection_layer_map = pd.DataFrame()
@@ -115,8 +115,17 @@ def add_layer(
     #if layer is None:
     if unknown: #redirected from get_layer
         _layer, _datatype = layer
+        _layer = int(_layer)
+        _datatype = int(_datatype)
+     #   assert isinstance(_layer, int)
+     #   assert isinstance(_datatype, int)
     else:
-        _layer, _datatype = get_layer(layer)
+        if isinstance(layer, tuple):
+            assert len(layer) == 2
+            _layer, _datatype = int(layer[0]), int(layer[1])
+        else:
+            _layer = int(layer)
+            _datatype = 0
     #layer = (cfg.default_xs['layer'][0], 0)
     #if datatype is None:
     #    datatype = 0
@@ -144,15 +153,20 @@ def add_layer(
             'origin': [origin],
             'remark': remark}
         df = pd.DataFrame(newlayer)
-        cfg.layer_table = pd.concat([cfg.layer_table, df], ignore_index=True)
+        try: #pandas in python 3.7
+             cfg.layer_table = pd.concat([cfg.layer_table, df], ignore_index=True, sort=True)
+        except:  #pandas in python <= 3.6
+             cfg.layer_table = pd.concat([cfg.layer_table, df], ignore_index=True)
         cfg.layer_table.index.name = 'id'
 
         #create a dict for speeding up get_layer
         tab = cfg.layer_table.set_index('layer_name')
         tab2 = tab.loc[:, ['layer', 'datatype']].stack().unstack(0)
         cfg.layerdict = tab2.to_dict(orient='list')
+        for ld in cfg.layerdict.values():
+            cfg.layerset.add(tuple(ld))
 
-    set_layercolor(layer,
+    set_layercolor((_layer, _datatype),
         frame_color, fill_color, frame_brightness, fill_brightness,
         dither_pattern, valid, visible, transparent, width, marked, animation,
         alpha)
@@ -285,15 +299,13 @@ def load_layers(filename):
     Returns:
         DataFrame: table with layers
     """
+    clear_layers()
 
     #TODO: add to existing table, not replace
     #TODO: check if layers are unique when adding tables.
     cfg.layer_table = pd.read_csv(filename, delimiter=',')
     cfg.layer_table.dropna(how='all', inplace=True)
     cfg.layer_table.index.name = 'id'
-    #delete unknown_layers when overwriting cfg.layer_table
-    global unknown_layers
-    unknown_layers = set()
 
     #TODO: add filename to column to track origin of content:
     #cfg.layer_table['filename'] = filename
@@ -302,6 +314,9 @@ def load_layers(filename):
     tab = cfg.layer_table.set_index('layer_name')
     tab2 = tab.loc[:, ['layer', 'datatype']].stack().unstack(0)
     cfg.layerdict = tab2.to_dict(orient='list')
+
+    for ld in cfg.layerdict.values():
+        cfg.layerset.add((int(ld[0]), int(ld[1])))
 
     merge_xsection_layers_with_layers()
     return cfg.layer_table
@@ -509,11 +524,11 @@ def get_layer(layer):
             text = 'internal Nazca '
             warning = False #return layID # avoid warnings
         else:
-            if isinstance(cfg.default_dump_layer, int):
-                layID = (int(cfg.default_dump_layer), 0)
-            elif isinstance(cfg.default_dump_layer, tuple):
-                if len(cfg.default_dump_layer) == 2:
-                    layID = cfg.default_dump_layer
+            if isinstance(cfg.default_layers['dump'], int):
+                layID = (int(cfg.default_layers['dump']), 0)
+            elif isinstance(cfg.default_layers['dump'], tuple):
+                if len(cfg.default_layers['dump']) == 2:
+                    layID = cfg.default_layers['dump']
             warning = True
         if warning and layer not in unknown_layers:
             if isinstance(layer, str):
@@ -521,26 +536,38 @@ def get_layer(layer):
                       "Setting it now and redirecting output to layer {2}. "\
                       "You can explicitly add a new layer by: "\
                       "add_layer(name='{1}', layer=<num>)\n"
-                      "Available layers are:\n{3}".\
+                      "Available layers are:\n{3}\n".\
                       format(text, layer, layID, sorted(list(cfg.layerdict.keys()))))
             else:
                 print("Warning: layer {0} not set. "\
                       "Redirecting output to collecting layer {1}. "\
                       "You can explicitly add a new layer by: "\
-                      "add_layer(name=<name>, layer={0})\n"\
-                      "Available layers are:\n{2}".\
+                      "add_layer(name=<name>, layer=<number>)\n"\
+                      "Available layers are:\n{2}\n".\
                      format(layer, layID, sorted(list(cfg.layerdict.keys()))))
             unknown_layers.add(layer)
-            add_layer(name=str(layer), layer=cfg.default_dump_layer)
+            add_layer(name=str(layer), layer=cfg.default_layers['dump'])
 
     if layID not in cfg.layerset:
         cfg.layerset.add(layID)
+        if cfg.redirect_unknown_layers:
+            layID = cfg.default_layers['dump']
         add_layer(name=str(layID), layer=layID, unknown=True)
+
     return layID
 
 
 def clear_layers():
-    """Drop all rows from layers and xsection tables"""
+    """Clear all objects with layer information.
+
+    Returns:
+        None
+    """
+    global unknown_layers
+    unknown_layers = set()
+    cfg.layerset= set()
+    cfg.layerdict = {}
+    #Drop all rows from layers and xsection tables, keep column names"""
     cfg.layer_table.drop(cfg.layer_table.index, inplace=True)
     cfg.xsection_layer_map.drop(cfg.xsection_layer_map.index, inplace=True)
     cfg.colors.drop(cfg.colors.index, inplace=True)
@@ -689,7 +716,6 @@ def set_layercolor(
     Returns:
         None
     """
-
     if layer is None:
         raise ValueError('Need to provide a layer number, or name.')
     else:
@@ -735,15 +761,22 @@ def set_layercolor(
                     colors[attr] = color_defaults[attr]
 
         df = pd.DataFrame(colors, index=[0])
-        cfg.colors = pd.concat([cfg.colors, df], ignore_index=True)
+        try: #pandas in python 3.7
+            cfg.colors = pd.concat([cfg.colors, df], ignore_index=True, sort=True)
+        except:  #pandas in python <= 3.6
+            cfg.colors = pd.concat([cfg.colors, df], ignore_index=True)
+
         cfg.colors['layer'] = cfg.colors['layer'].astype(str)
         cfg.colors['datatype'] = cfg.colors['datatype'].astype(str)
     elif items == 1:
-        for attr in colors.keys(): #use existing values for undefined attributes
-            if colors[attr] is None:
-                #TODO: Better use a try to catch color_defaults are missing:
-                if attr in color_defaults.keys():
-                    colors[attr] = select[attr].iloc[0]
+        for attr in cfg.colors.columns: #colors.keys(): #use existing values for undefined attributes
+            if attr in colors.keys():
+                if colors[attr] is None:
+                    #TODO: Better use a try to catch color_defaults are missing:
+                    if attr in color_defaults.keys():
+                        colors[attr] = select[attr].iloc[0]
+            else:
+                colors[attr] = select[attr].iloc[0]
         df = pd.DataFrame(colors, index=select.index) #.set_index(idx)
 
         # TODO: this could be a new (extra) layername with an old layer number

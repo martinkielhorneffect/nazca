@@ -93,7 +93,7 @@ def cell_close():
     return gbase.gds_endstr()
 
 
-def cell_reference(xy, name, adeg=0, mag=1, flip=False, array=None): # angle in degrees
+def cell_reference(xy, name, adeg=0, mag=1.0, flip=False, array=None): # angle in degrees
     """Add a cell reference (instance) to a GDS cell.
 
     Args:
@@ -108,7 +108,7 @@ def cell_reference(xy, name, adeg=0, mag=1, flip=False, array=None): # angle in 
         bytestring: stream for a cell reference
     """
     if array is None:
-        unique = True
+        unique = True #flag to remove double polygon points
         strm = gbase.gds_sref() + gbase.gds_sname(name)
         xy = [xy]
     else:
@@ -116,9 +116,8 @@ def cell_reference(xy, name, adeg=0, mag=1, flip=False, array=None): # angle in 
         strm = gbase.gds_aref() + gbase.gds_sname(name)
         col, row = array[0], array[2]
         xy = [xy] + \
-             [[xy[0]+array[1][0], xy[1]+array[1][1]]] + \
-             [[xy[0]+array[3][0], xy[1]+array[3][1]]]
-
+             [[xy[0]+array[1][0]*col, xy[1]+array[1][1]*col]] + \
+             [[xy[0]+array[3][0]*row, xy[1]+array[3][1]*row]]     
     # Insert STRANS record if needed. If this record is omitted, the
     # defaults for the element are no reflection, non-absolute
     # magnification, and non-absolute angle (which is what we want anyway).
@@ -135,6 +134,7 @@ def cell_reference(xy, name, adeg=0, mag=1, flip=False, array=None): # angle in 
         strm += gbase.gds_colrow(col, row)
     strm += gbase.gds_xy(xy, close=False, unique=unique) + gbase.gds_endel()
     return strm
+
 
 def layout_close():
     """Close a GDS stream.

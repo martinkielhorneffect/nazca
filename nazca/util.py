@@ -421,3 +421,27 @@ def transform_polygon(points, dx=0.0, dy=0.0, da=0.0, scale=1.0,
                      y + scale*(sin(a)*u + cos(a)*v) ))
     return xy
 
+
+def read_and_filter_ascii(filename):
+    """Read ascii layout export and delete time-stamp records for diff.
+
+    Args:
+        filename (str): ascii layout file to read and filter.
+
+    Returns:
+        str: ascii layout in <filename> output minus time stamps
+    """
+    file = ''
+    bgnstr = 1
+    with open(filename, 'r') as fref:
+        while True:
+            line = fref.readline()
+            bgnstr += 1
+            if ('bgnstr' in line) or ('bgnlib' in line) or ('libname' in line):
+                bgnstr = 0
+            if bgnstr != 1:
+                file += line
+            if line == '':
+                break
+    return file
+

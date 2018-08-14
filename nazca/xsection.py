@@ -377,7 +377,7 @@ class Xsection():
             float: effective refractive index
         """
         R = kwargs.pop('R', 0)
-        w = kwargs.pop('wl', 0)
+        w = kwargs.pop('w', 0)
         wl = kwargs.pop('wl', sim.wl)
         pol = kwargs.pop('pol', sim.pol)
         return self.__Neff(R=R, wl=wl, pol=pol)

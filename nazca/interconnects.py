@@ -99,7 +99,7 @@ class Interconnect():
             nd.export_plt()
     """
 
-    def __init__(self, radius=None, width=None, angle=90, xs='nazca',
+    def __init__(self, radius=None, width=None, angle=90, xs=None,
             layer=None, adapt_width=False, adapt_xs=False):
         """Contruct an Interconnect object.
 
@@ -115,7 +115,10 @@ class Interconnect():
             width (float): default waveguide width im um
             angle (float): default angle of a bend (default = 90 degrees)
             xs (str): waveguide xsection (default = 'nazca')
-            layer (str): layer to draw interconnect in
+            layer (str): layer to draw interconnect in.
+                It is preferred to use a xs rather than a layer for Interconnects
+                to store additional information like offset, index, etc.
+                (default = None)
             adapt_width (bool): adapt interconnect width to the pin in connects to
                 (default = False)
             adapt_xs (bool): adapt interconnect width to the pin in connects to
@@ -141,10 +144,18 @@ class Interconnect():
         else:
             self.width = width
 
-        self.angle = angle #angle
-        self.length = 10 #length
-        self.xs = xs
+        if layer is None and xs is None:
+            self.xs = cfg.default_xs_name
+        else:
+            self.xs = xs
+        if self.xs is None:
+            print("Warning: Created an Interconnect object with layer {} "\
+                "but no xsection.".format(layer))
+
         self.layer = layer
+
+        self.angle = angle
+        self.length = 10
         self.instantiate = False
         self.xya = (100, 100, 10)
         self.line = nd.Tp_straight(xs=self.xs, layer=self.layer)
@@ -158,6 +169,7 @@ class Interconnect():
         self.adapt_xs = adapt_xs
         self.arrow = tdk.make_pincell()
 
+        self.max_length = 1e5 # maximum line length in p2l.
 
     def copy(self, ic=None):
         """Create a copy of the Interconnect object.
@@ -180,10 +192,20 @@ class Interconnect():
             adapt_xs=ic.adapt_xs)
 
 
-    def arc(self, radius=10, width=1.0, angle=90, xs=None,
+    def _arc(self, radius=None, width=None, angle=None, xs=None,
             layer=None, offset=None, name=None):
         # put arc in a function to make it overloadable in derived classed.
         # (a derived function can't overload a base attribute)
+        if layer is None:
+            layer = self.layer
+        if xs is None:
+            xs = self.xs
+        if radius is None:
+            radius = self.radius
+        if width is None:
+            width = self.width
+        if angle is None:
+            angle = self.angle
         return self.Farc(radius=radius, width=width, angle=angle, xs=xs,
             layer=layer, offset=offset, name=name)
 
@@ -274,6 +296,8 @@ class Interconnect():
             layer (int | str): layer number or layername
             edge1 (function): optional function F(t) describing edge1 of the waveguide
             edge2 (function): optional function G(t) describing edge2 of the waveguide
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: waveguide element
@@ -296,7 +320,7 @@ class Interconnect():
         if length is None:
             length = self.length
 
-        with nd.Cell('strt_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+        with nd.Cell('strt_{}'.format(xs), instantiate=self.instantiate, cnt=True) as ICcell:
             trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
             self.line(length=length, width=width, xs=xs, edge1=edge1,
@@ -323,9 +347,11 @@ class Interconnect():
             angle (float): angle of arc in degree (default = 90)
             pin (Node): optional Node for modeling info
             xs (str): optiinal xsection of bend
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
-            Cell: circularly bent waveguide element
+            Cell: circularly-bent waveguide element
 
         Example:
             Create and place a bend::
@@ -346,10 +372,10 @@ class Interconnect():
         if angle is None:
             angle = self.angle
 
-        with nd.Cell('bend_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+        with nd.Cell('bend_{}'.format(xs), instantiate=self.instantiate, cnt=True) as ICcell:
             trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-            self.arc(radius=radius, width=width, angle=angle, xs=xs, name=name,
+            self._arc(radius=radius, width=width, angle=angle, xs=xs, name=name,
                 offset=offset).put(0)
             nd.Pin('b0', width=width, xs=xs).put()
             if arrow:
@@ -373,6 +399,8 @@ class Interconnect():
             width2 (float): end width of taper
             pin (Node): optional Node for modeling info
             xs (str): optional xsection of taper
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: parabolic taper element
@@ -396,7 +424,7 @@ class Interconnect():
         if length is None:
             length = self.length
 
-        with nd.Cell('ptaper_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+        with nd.Cell('ptaper_{}'.format(xs), instantiate=self.instantiate, cnt=True) as ICcell:
             trace.trace_start()
             nd.Pin('a0', width=width1, xs=xs).put(0, 0, 180)
             self.__ptaper(length=length, width1=width1, width2=width2,
@@ -423,6 +451,8 @@ class Interconnect():
             width2 (float): end width of taper
             xs (str): optional xsection of taper
             pin (Node): optional Node for modeling info
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: linear taper element
@@ -446,7 +476,7 @@ class Interconnect():
         if length is None:
             length = self.length
 
-        with nd.Cell('taper_'+xs, instantiate=self.instantiate, cnt=True) as ICcell:
+        with nd.Cell('taper_{}'.format(xs), instantiate=self.instantiate, cnt=True) as ICcell:
             trace.trace_start()
             nd.Pin('a0', width=width1, xs=xs).put(0, 0, 180)
             self.__taper(length=length, width1=width1, width2=width2,
@@ -463,15 +493,96 @@ class Interconnect():
         return ICcell
 
 
+    def strt_p2l(self, pin=None, ref=None, width=None, xs=None,
+            name=None, arrow=True, max_length=None):
+        """Create a straight guide to intersect a reference line.
+
+        p2l: point-to-line. Note there is no solution for a reference line
+        parallel to the pointer in pin. To avoid huge (near parallel) lines,
+        a max-length can be specified.
+
+         Args:
+            pin (Node | Instance | tuple(x, y, a)): start pin (default = cp)
+            ref (Node | Instance)| tuple(x, y, a)): the reference line to intersect
+            width (float): width of the interconnect in um
+            xs (str): optional xsection of sbend
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
+            max_length (float): maximum length of the guide.
+
+         Example:
+            Create and place a straigth waveguide to intersect with a
+            reference line::
+
+                import nazca as nd
+                from nazca.interconnects import Interconnect
+                ic = Interconnect(width=2.0, radius=10.0)
+
+                guide = ic.bend(angle=45)
+                guide.put()
+                nd.export_plt()
+        Returns:
+            Cell: straight waveguide element.
+        """
+        if max_length is None:
+            max_length = self.max_length
+        if pin is None:
+            pin = cp.here()
+        if ref is None:
+            print("Error: strt_p2l needs a reference line.")
+            xs = 'error'
+
+        pinb, T = nd.parse_pin(pin)
+        pin = pinb.move(*T)
+        refb, T = nd.parse_pin(ref)
+        ref = refb.move(*T)
+
+        if xs != 'error':
+            xs = self._getxs(pin, xs)
+        width = self._getwidth(pin, width, xs)
+
+        x, y, a = nd.diff(pin, ref)
+        L = x + y * m.tan(m.radians(a-90))
+
+        rot = 0
+        if abs(L) > max_length:
+            L = sign(L) * max_length
+            print("(interconnect): Solution for strt_p2l too large: >{}.".\
+                format(max_length))
+        if L < 0:
+            rot = 180
+            L = -L
+            xs = 'error'
+            print("(interconnect): Error: negative length for strt_p2l.")
+
+        if name is None:
+            name = 'strt'
+        with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
+            trace.trace_start()
+            nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
+            self.line(length=L, width=width, xs=xs).put(0, 0, rot)
+            nd.Pin('b0', width=width, xs=xs).put()
+            trace.trace_stop()
+            ICcell.length_geo = trace.trace_length()
+            if arrow:
+                self.arrow.put(ICcell.pin['a0'])
+                self.arrow.put(ICcell.pin['b0'])
+
+        cfg.cp = pin
+        return ICcell
+
+
     def strt_p2p(self, pin1=None, pin2=None, width=None, xs=None, name=None,
             arrow=True):
         """Create point-to-point straight interconnect.
 
         Args:
-            pin1 (Node | Instance): start of waveguide
-            pin2 (Node | Instance): end of waveguide
+            pin1 (Node | Instance | tuple(x, y, a)): start of waveguide
+            pin2 (Node | Instance | tuple(x, y, a)): end of waveguide
             width (float): width of waveguide
             xs (str): optional xsection of waveguide
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: straight waveguide element
@@ -529,6 +640,8 @@ class Interconnect():
             ref (Node): reference pin (default = org)
             angle (float): rotation with repect to ref in [Degrees] (default = 0)
             cw (bool): angle direction clockwise or counter clockwise (default is shortest bend)
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             float: angle to rotate from <pin> to <ref> + <a>
@@ -578,6 +691,8 @@ class Interconnect():
             width (float): width of waveguide
             xs (str): optional xsection of waveguide
             radius (float): radius at the center line of the bend in um
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: waveguide element rotating from <pin> into to the desired direction
@@ -610,7 +725,7 @@ class Interconnect():
             trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
             self.line(length=length1, width=width, xs=xs).put(0)
-            self.arc(angle=a, radius=radius, width=width, xs=xs).put()
+            self._arc(angle=a, radius=radius, width=width, xs=xs).put()
             self.line(length=length2, width=width, xs=xs).put()
             nd.Pin('b0', width=width, xs=xs).put()
             if arrow:
@@ -640,6 +755,8 @@ class Interconnect():
                 When positive/negative, additional length is added at the
                 end/start of the s-bend, provided the forward length of the
                 s-bend itself is shorter than abs(Ltot).
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: sbend element
@@ -688,9 +805,9 @@ class Interconnect():
             trace.trace_start()
             nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
             self.line(La, width, xs=xs).put(0)
-            self.arc(radius, angle=-m.degrees(A), width=width, xs=xs).put()
+            self._arc(radius, angle=-m.degrees(A), width=width, xs=xs).put()
             self.line(L, width).put()
-            self.arc(radius, angle=m.degrees(A), width=width, xs=xs).put()
+            self._arc(radius, angle=m.degrees(A), width=width, xs=xs).put()
             self.line(Lb, width, xs=xs).put()
             nd.Pin('b0', width=width, xs=xs).put()
             if arrow:
@@ -714,6 +831,8 @@ class Interconnect():
             xs (str): xsection of cbend
             distance (float): total forward length of the cbend in um
             offset (float): lateral offset of the cbend in um
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: cbend element
@@ -853,13 +972,15 @@ class Interconnect():
         The direction of the end pin is ignored.
 
         Args:
-            pin1 (Node | Instance): start pin (default = cp)
-            pin2 (Node | Instance): end pin
+            pin1 (Node | Instance | tuple(x, y, a)): start pin (default = cp)
+            pin2 (Node | Instance | tuple(x, y, a)): end pin
             width (float): width of the interconnect in um
             radius (float): bend radius of the interconnect in um
             xs (str): optional xsection of sbend
             Lstart (float): straight waveguide length at beginning (positive value)
                 or end (negative value) of sbend
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: sbend element
@@ -900,9 +1021,9 @@ class Interconnect():
                     trace.trace_start()
                     nd.Pin('a0', width=width, xs=xs).put((0, 0, 180))
                     self.line(La, width, xs=xs).put()
-                    self.arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
+                    self._arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
                     self.line(Lstr, width, xs=xs).put()
-                    self.arc(radius=radius, angle=-m.degrees(A), width=width, xs=xs).put()
+                    self._arc(radius=radius, angle=-m.degrees(A), width=width, xs=xs).put()
                     self.line(Lb, width, xs=xs).put()
                     nd.Pin('b0', width=width, xs=xs).put()
                     if arrow:
@@ -922,7 +1043,7 @@ class Interconnect():
                     with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
                         nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
                         self.line(La, width, xs=xs).put()
-                        self.arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
+                        self._arc(radius=radius, angle=m.degrees(A), width=width, xs=xs).put()
                         nd.Pin('b0', width=width, xs=xs).put()
                         if arrow:
                             self.arrow.put(ICcell.pin['a0'])
@@ -936,7 +1057,7 @@ class Interconnect():
                     with nd.Cell(name, instantiate=self.instantiate, cnt=True) as ICcell:
                         nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
                         self.line(Lb, width, xs=xs).put()
-                        self.arc(radius=radius, angle=m.degrees(-A), width=width, xs=xs).put()
+                        self._arc(radius=radius, angle=m.degrees(-A), width=width, xs=xs).put()
                         nd.Pin('b0', width=width, xs=xs).put()
                         if arrow:
                             self.arrow.put(ICcell.pin['a0'])
@@ -1017,14 +1138,14 @@ class Interconnect():
                 t1 = m.radians(0)+gt # angle of spoke that points to start-point bsb on the circle
                 t2 = m.radians(da)+gt # angle of spoke that points to end-point bsb on the circle
                 if d1 == 1:
-                    b = negRad(-t1) # angle of drawn self.arc on start self.arc
+                    b = negRad(-t1) # angle of drawn self._arc on start self._arc
                 else:
-                    b = posRad(-t1) # angle of drawn self.arc on start self.arc
+                    b = posRad(-t1) # angle of drawn self._arc on start self._arc
 
                 if d2 == -1:
-                    e = negRad(t2) # angle of drawn self.arc on end self.arc
+                    e = negRad(t2) # angle of drawn self._arc on end self._arc
                 else:
-                    e = posRad(t2) # angle of drawn self.arc on start self.arc
+                    e = posRad(t2) # angle of drawn self._arc on start self._arc
 
 
                 L = s*m.cos(gb) # length of straight self.line
@@ -1069,14 +1190,16 @@ class Interconnect():
         """Generate a point-to-point bend-straight-bend interconnect.
 
         Args:
-            pin1 (Node | Instance): start pin (default = cp)
-            pin2 (Node | Instance): end pin
+            pin1 (Node | Instance | tuple(x, y, a)): start pin (default = cp)
+            pin2 (Node | Instance | tuple(x, y, a)): end pin
             radius1 (float): optional first bend radius in um
             radius2 (float): optional second bend radius im um
             width (float): optional waveguide width in um
             xs (str): optional xsection
             ictype (str): interconnection type (default = 'shortest')
                 options: 'shortest', 'll', 'lr', 'rl', rr', 'all'
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: bend_strt_bend element
@@ -1127,9 +1250,9 @@ class Interconnect():
                     instantiate=instantiate, cnt=True) as ICcell:
                 trace.trace_start()
                 nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
-                self.arc(radius1, angle=m.degrees(b), width=width, xs=xs).put()
+                self._arc(radius1, angle=m.degrees(b), width=width, xs=xs).put()
                 self.line(L, width, xs=xs).put()
-                self.arc(radius2, angle=m.degrees(e), width=width, xs=xs).put()
+                self._arc(radius2, angle=m.degrees(e), width=width, xs=xs).put()
                 nd.Pin('b0', width=width, xs=xs).put()
                 if arrow:
                     self.arrow.put(ICcell.pin['a0'])
@@ -1225,11 +1348,13 @@ class Interconnect():
         """Create point-to-point straight-bend-straight interconnect.
 
         Args:
-            pin1 (Node | Instance): start pin (default = cp)
-            pin2 (Node | Instance): end pin
+            pin1 (Node | Instance | tuple(x, y, a)): start pin (default = cp)
+            pin2 (Node | Instance | tuple(x, y, a)): end pin
             radius (float): optional bend radius in um
             width (float): optional waveguide width in um
             xs (str): optional xsection
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: strt_bend_strt element
@@ -1271,7 +1396,7 @@ class Interconnect():
                 trace.trace_start()
                 nd.Pin('a0', width=width, xs=xs).put(0, 0, 180)
                 self.line(L1, width, xs=xs).put()
-                self.arc(radius, angle=da, width=width, xs=xs).put()
+                self._arc(radius, angle=da, width=width, xs=xs).put()
                 self.line(L2, width, xs=xs).put()
                 nd.Pin('b0', width=width, xs=xs).put()
                 if arrow:
@@ -1305,8 +1430,8 @@ class Interconnect():
         The orientation of the output pin does not matter
 
         Args:
-            pin1 (Node | Instance): start pin (default = cp)
-            pin2 (Node | Instance): end pin
+            pin1 (Node | Instance | tuple(x, y, a)): start pin (default = cp)
+            pin2 (Node | Instance | tuple(x, y, a)): end pin
             radius (float): optional bend radius in um
             width (float): optional waveguide width in um
             xs (str): optional xsection of ubend
@@ -1412,16 +1537,17 @@ class Interconnect():
         """Create point-to-point pcurve interconnect.
 
         Args:
-            pin1 (Node | Instance): start pin (default = cp)
-            pin2 (Node | Instance): end pin
+            pin1 (Node | Instance | tuple(x, y, a)): start pin (default = cp)
+            pin2 (Node | Instance | tuple(x, y, a)): end pin
             width (float): optional waveguide width in um
             xs (str): optional xsection
-            Rin (float):
-            Rout (float):
+            Rin (float): radius at start of the pcurve (default = 0 -> inf)
+            Rout (float): radius at start of the pcurve (default = 0 -> inf)
             Oin (float):
             Oout (float):
-            name (str):
-            arrow (bool):
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
+
 
         Returns:
             Cell: pcurve interconnect element
@@ -1494,6 +1620,8 @@ class Interconnect():
             polyline (bool): boolean determining if the mamba is also drawn as polyline
                 (default = True)
             showpins (bool): show the points as dots in the layout (default = False)
+            name (str): optional new name for the component
+            arrow (bool): draw connection arrows (default = True)
 
         Returns:
             Cell: mamba element through <points>

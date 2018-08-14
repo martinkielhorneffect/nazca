@@ -596,42 +596,40 @@ def MMI_poly(wmmi=10, lmmi=100, wi=None, wo=None, oi=None, oo=None, angle=53):
     return list(pi)+po
 
 
-#def icon_mmi(Nin=2, Nout=2, w_in=2.0, w_gap=1.0, l_in=1.0, l_tot=10.0, l_buf=0.0):
-#    """generic MMI shape for icons on BBs.
-#
-#    Args:
-#        Nin (int): numebr of input guides
-#        Nout (int): number of output guides
-#        w_in (float): io waveguide width in um
-#        w_gap (float): gap width between io guides in um
-#        l_in (float): io waveguide length in um
-#        l_tot (float): total length of the MMI polygon including io in um
-#
-#    Returns:
-#       Polygon: polygon with MMI shape
-#    """
-#    w_pitch = w_in + w_gap
-#    w_mmi = max(Nin, Nout)*w_pitch+w_gap
-#    l_mmi = l_tot - 2*l_in -2*l_buf
-#
-#    Nin0 = 0.5*(Nin-1)
-#    Nout0 = 0.5*(Nout-1)
-#
-#    p = [] # list of points (x, y)
-#    p.append((l_buf+l_in, -0.5*w_mmi)) #bottom left
-#    for i in range(Nin):
-#        p.append((l_buf+l_in, (-Nin0+i)*w_pitch - 0.5*w_in))
-#        p.append((l_buf, (-Nin0+i)*w_pitch - 0.5*w_in))
-#        p.append((l_buf, (-Nin0+i)*w_pitch + 0.5*w_in))
-#        p.append((l_buf+l_in, (-Nin0+i)*w_pitch + 0.5*w_in))
-#    p.append((l_buf+l_in, +0.5*w_mmi))
-#    p.append((l_tot-l_in-l_buf, +0.5*w_mmi))
-#    for i in range(Nout-1, -1, -1):
-#        p.append((l_tot-l_in-l_buf, (-Nout0+i)*w_pitch + 0.5*w_in))
-#        p.append((l_tot-l_buf, (-Nout0+i)*w_pitch + 0.5*w_in))
-#        p.append((l_tot-l_buf, (-Nout0+i)*w_pitch - 0.5*w_in))
-#        p.append((l_tot-l_in-l_buf, (-Nout0+i)*w_pitch - 0.5*w_in))
-#    p.append((l_tot-l_in-l_buf, -0.5*w_mmi))
-#    return p
+def transform(points, center=(0, 0, 0), scale=1.0,
+        flipx=False, flipy=False, move=(0, 0, 0)):
+    """Transform a polygon by translation, rotation, scaling and/or flipping.
 
+    The transformation first relocates the origin to the point in <center>reposition the origin.
+    Subsequently, the scale, rotate and flips are applied, where order does not matter.
+    Finally, a (x, y) translation is performed.
+
+    Args:
+        polygon (list of (float, float)): points (x, y)
+        center ((float, float, float)): (x, y, a) as  center of scaling
+            (default = (0, 0, 0))
+        scale (float): scaling factor (default = 1.0)
+        flipx (bool): flip x coordinate x -> -x (default = False)
+        flipy (bool): flip y coordinate y -> -y (default = False)
+        move ((float, float, float)): (x, y, a) tranlation after any scaling
+            and/or flipping (default = (0, 0, 0)).
+
+    Returns:
+        (list of (float, float)): transformed polygon points
+    """
+    dx, dy, da = center
+    x0, y0, a0 = move
+    fu,fv = 1, 1
+    if flipx:
+        fu = -1
+    if flipy:
+        fv = -1
+    a = radians(-da)
+    xy = []
+    for u, v in points:
+        u = (u-dx)*fu
+        v = (v-dy)*fv
+        xy.append( ( x0 + scale*(cos(a)*u - sin(a)*v),
+                     y0 + scale*(sin(a)*u + cos(a)*v) ))
+    return xy
 

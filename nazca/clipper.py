@@ -18,39 +18,60 @@
 # Grow and merge polygons.
 # Uses the pyclipper module
 #
-# (c) 2017 Xaveer Leijtens
+# (c) 2017 Xaveer Leijtens, Ronald Broeke 2018 (c)
 #
 """
 Module with grow and merge polygon functions.
 """
+import nazca.cfg as cfg
+
 try:
     import pyclipper
-
+    cfg.PYCLIPPER = True
+except Exception as e:
+    cfg.PYCLIPPER = False
+    #print('Warning: Could not import pyclipper:', e)
+if cfg.PYCLIPPER:
     st = pyclipper.scale_to_clipper
     sf = pyclipper.scale_from_clipper
 
-except Exception as e:
-    print('Warning: Could not import pyclipper:', e)
 
+clipper_check = False
+def _has_pyclipper():
+    """Check if pyclipper module is loaded.
+
+    Returns:
+        bool: True if pyclipper is loaded
+    """
+    global clipper_check
+    if cfg.PYCLIPPER:
+        return True
+    else:
+        if not clipper_check:
+            print("Error: could not load module 'pyclipper'."\
+                " Skipping requested pyclipper functionality.")
+            clipper_check = True
+        return False
 
 
 def merge_polygons(paths, accuracy=0.001):
     """Merge polygons and return a list with the resulting polygon(s).
 
     Args:
-        paths (list): list of polygons that each have a list of (x,y) coordinates.
+        paths (list): list of polygons. A polygon is list of coordinates (x, y).
         accuracy (float): accuracy [µm] of the location of the intermediate points.
-        There is no good reason to deviate from the default (defualt = 0.001 µm).
+            There is no good reason to deviate from the default (default = 0.001 µm).
 
     Returns:
-        list: list of points [(x1, y1), (x2, y2), ...]
+        list: list of polygons  [ [(x1, y1), (x2, y2), ...], [...], ... ]
     """
-
+    if not _has_pyclipper():
+        return paths
     sc = 1 / accuracy
     pc = pyclipper.Pyclipper()
     pc.AddPaths(st(paths, sc), pyclipper.PT_SUBJECT, True)
     mp = pc.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO,
-            pyclipper.PFT_NONZERO)
+        pyclipper.PFT_NONZERO)
     return sf(mp, sc)
 
 
@@ -67,7 +88,8 @@ def grow_polygons(paths, grow=5, accuracy=0.1, jointype='round'):
     Returns:
         list: list of points [(x1, y1), (x2, y2), ...]
     """
-
+    if not _has_pyclipper():
+        return paths
     if grow == 0: # 0-grow would affect polygons because of the grid.
         return paths
     sc = 1 / accuracy
@@ -75,7 +97,7 @@ def grow_polygons(paths, grow=5, accuracy=0.1, jointype='round'):
     pco = pyclipper.PyclipperOffset()
     # Join type
     jt = {'round': pyclipper.JT_ROUND, 'square': pyclipper.JT_SQUARE,
-            'miter': pyclipper.JT_MITER}
+        'miter': pyclipper.JT_MITER}
     if jointype not in jt:
         print("jointype '{}' unknown.".format(jointype))
         print("jointype should be one of 'round', 'square', 'miter'.")
@@ -97,7 +119,8 @@ def diff_polygons(paths_A, paths_B, accuracy=0.001):
     Returns:
         list: List of polygons that result from subtraction: paths_A - paths_B.
     """
-
+    if not _has_pyclipper():
+        return paths_A + paths_B
     sc = 1 / accuracy
     pc = pyclipper.Pyclipper()
     pc.AddPaths(st(paths_A, sc), pyclipper.PT_SUBJECT, True)

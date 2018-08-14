@@ -195,7 +195,7 @@ Use this variable to put instances of the cells:
             else:
                 _hash_name = name_long
 
-            # add cfg version to avoid importing template_core for hashme attributes
+            # add cfg to avoid explicit import of this module for hashme attributes
             cfg.hash_id = _hash_id
             cfg.hash_params = _hash_params
             basename = cfg.gds_cellname_cleanup(name)
@@ -210,6 +210,7 @@ Use this variable to put instances of the cells:
                 if funcid != cfg.hash_func_id:
                     print("ERROR: Reusing a basename across functions: '{}'".\
                         format(basename))
+                    #raise
             except:
                 if cfg.validate_basename:
                     nd.validate_basename(basename)
@@ -512,16 +513,17 @@ def _makestub(xs_guide=None, width=0, length=2.0, shape=None, pinshape=None,
         if xs_guide not in cfg.XSdict.keys():
             if xs_guide not in missing_xs:
                 missing_xs.append(xs_guide)
-                print("Can not make a stub in undefined xsection '{0}'.\n"\
-                   "  Possible causes: '{0}' is misspelled or not yet defined.\n"\
-                   "  Will use xsection '{2}' instead and continue.\n"
-                   "  To define a new xsection:\n"\
-                   "      add_xsection(name='{0}')\n"\
-                   "  or with layers info and adding a custom stub:\n"\
-                   "      add_xsection(name='{0}', layer=1)\n"\
-                   "      add_xsection(name='{1}', layer=2)\n"\
-                   "      add_stub(xsection='{0}', stub='{1}')".\
-                       format(xs_guide, 'stubname', cfg.default_xs_name))
+                if xs_guide != cfg.default_xs_name:
+                    print("Can not make a stub in undefined xsection '{0}'.\n"\
+                       "  Possible causes: '{0}' is misspelled or not yet defined.\n"\
+                       "  Will use xsection '{2}' instead and continue.\n"
+                       "  To define a new xsection:\n"\
+                       "      add_xsection(name='{0}')\n"\
+                       "  or with layers info and adding a custom stub:\n"\
+                       "      add_xsection(name='{0}', layer=1)\n"\
+                       "      add_xsection(name='{1}', layer=2)\n"\
+                       "      add_stub(xsection='{0}', stub='{1}')".\
+                           format(xs_guide, 'stubname', cfg.default_xs_name))
                 xs_guide = cfg.default_xs_name
 
         cfg.stubmap[xs_guide] = xs_guide
@@ -549,7 +551,8 @@ def _makestub(xs_guide=None, width=0, length=2.0, shape=None, pinshape=None,
                     outline = geom.circle(radius=0.5*length, N=32)
                 else:
                     outline = geom.box(width=width+2*growx, length=length)
-                nd.Polygon(layer=lay, points=outline).put(0, 0, 180)
+                if width != 0:
+                    nd.Polygon(layer=lay, points=outline).put(0, 0, 180)
 
                 if shape not in stubshapes:
                     print("Warning: stub shape '{}' not recognized, possible options are {}.".
@@ -956,15 +959,19 @@ def put_boundingbox(pinname, length, width, raise_pins=True, outline=True,
             parameters(parameters=_parameters).put(bbox.pin['cc'])
 
     # options to align the bbox in this cell w.r.t. to its pins:
-    align_options = [ 'lb', 'lc', 'lt', 'rb', 'rc', 'rt', 'cc']
-
-    align_options_xy = [
-        (0, 0.5*width), (0, 0), (0, -0.5*width), #lb, lc, lt
-        (-length, 0.5*width), (-length, 0), (-length, -0.5*width), #rb, rc, rt
-        (-0.5*length, 0)] #cc
-
-    dx = align_options_xy[align_options.index(align)][0]
-    dy = align_options_xy[align_options.index(align)][1]
+    align_shift = {
+        'lb': (0, 0.5*width),
+        'lc': (0, 0),
+        'lt': (0, -0.5*width),
+        'rb': (-length, 0.5*width),
+        'rc': (-length, 0),
+        'rt': (-length, -0.5*width),
+        'bc': (-0.5*length, 0.5*width),
+        'cc': (-0.5*length, 0),
+        'tc': (-0.5*length, -0.5*width)
+    }
+    dx = align_shift[align][0]
+    dy = align_shift[align][1]
 
     box = bbox.put(cfg.cells[-1].pin[pinname].move(dx, dy).move(*move))
     cell.length = length

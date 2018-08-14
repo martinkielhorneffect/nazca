@@ -30,7 +30,6 @@ from pprint import pprint
 import matplotlib.pyplot as mplt
 from matplotlib.patches import Polygon as matPolygon
 from matplotlib.collections import PatchCollection
-import svgwrite
 
 from . import gds as gdsmod
 from . import gds_base as gbase
@@ -41,12 +40,17 @@ from .mask_layers import add_layer, get_layer
 from . import cfg
 from . import util
 
+try:
+    import svgwrite
+    cfg.SVGWRITE = True
+except:
+    cfg.SVGWRITE = False
 
 
 # =============================================================================
 # Nazca cell
 # =============================================================================
-class Celltree():
+class ClsNazca():
     """Helper class to handle Nazca cell tree transformations.
 
     Note that this class does not reconstruct the netlist in the
@@ -56,59 +60,91 @@ class Celltree():
     flatten a celltree, change and/or delete or filter out layers,
     change cell names.
     """
-
-    def __init__(self, instantiate=True, cellmap=None, layermap=None, flat=None):
+    def __init__(self, instantiate=True, cellmap=None, layermap=None,
+            flat=None, infolevel=0):
         self.cellsopen = []
         self.flat = flat
         self.instantiate = instantiate
         self.layermap = layermap
         self.cellmap = cellmap
+        self.oldcellrefs = {} # link old cell to new cell
+        self.newcellrefs = {} # link new cell to old cell
         self.topcell = None
+        self.infolevel = infolevel
 
-    def open(self, cell):
-        """Open new Cell object."""
-        print("CELLTREE: open", cell.cell_name)
-        self.cellsopen.append(
-            Cell(name=cell.cell_name, instantiate=self.instantiate))
-        if self.topcell is None:
-            self.topcell = self.cellsopen[-1]
+
+    def open(self, params):
+        """Open new Cell object based on namedtuple <cellinfo>.
+
+        Args:
+            cell (Cell): original cell to be copied/filtered
+            level (int): cell level in hierarchy (0 is topcell)
+
+        """
+        self.level = params.level
+        if params.cell_name is None:
+            cell_name = params.cell.cell_name + '_N'
+        else:
+            cell_name = params.cell_name
+        if self.infolevel > 0:
+            print("{}.{}ClsNazca: open  '{}' source:'{}'".\
+                format(self.level, '  '*self.level, cell_name, params.cell.cell_name))
+        newcell = Cell(name=cell_name, instantiate=self.instantiate)
+        self.cellsopen.append(newcell)
+        self.oldcellrefs[newcell] = params.cell
+        self.newcellrefs[params.cell] = newcell
+        if params.level == 0:
+            self.topcell = newcell
+        return newcell
 
     def close(self):
         """Close Cell object."""
-        cell = self.cellsopen.pop()
-        cell.close()
-        print("CELLTREE: close ", cell.cell_name)
+        newcell = self.cellsopen.pop()
+        newcell.close()
+        if self.infolevel > 0:
+            print("{}.{}ClsNazca: close '{}'".\
+                format(self.level, '  '*self.level, newcell.cell_name))
+        return newcell
 
-
-    def add_polygon(self, layer, xy, bbox):
+    def add_polygon(self, layer, xy):
         """"""
         Polygon(points=xy, layer=layer).put(0)
-        #print("CELLTREE: add_polygon", cfg.cells[-1].cell_name, xy[:4], layer)
+        #print("ClsNazca: add_polygon to", cfg.cells[-1].cell_name, xy[:3], layer)
 
 
-    def add_polyline(self, pline, xy, bbox):
+    def add_polyline(self, layer, xy):
         """"""
-        print("CELLTREE: add_polylines")
+        Polyline(points=xy, layer=layer).put(0)
+        #print("ClsNazca: add_polylines")
 
 
-    def add_annotation(self, anno, xy):
+    def add_annotation(self, text, layer, pos):
         """"""
-        #print("CELLTREE: add_annotation")
-        Annotation(text=anno.text, layer=anno.layer).put(*xy)
+        #print("ClsNazca: add_annotation")
+        Annotation(text=text, layer=layer).put(*pos)
 
-    def add_instance(self):
+
+    def add_instance(self, inode, xya, flip):
         """"""
-        print("CELLTREE: add_instance")
+        if self.infolevel > 0:
+            print("{}.{}ClsNazca: add_instance '{}' xya:{}, flip:{}".\
+                format(self.level, '  '*self.level, inode.cell.cell_name, xya, flip))
+        cell = inode.cell
+        if cell.instantiate: #and not flat:
+            #TODO, flatten array's here if not instantiated?
+            self.newcellrefs[cell].put(*xya, flip=inode.flip, array=inode.array)
+
 
     def add_gds(self):
         """"""
-        print("CELLTREE: add_gds")
+        if self.infolevel > 0:
+            print("ClsNazca: add_gds")
 
 
 # =============================================================================
 # GDS
 # =============================================================================
-manual_nazca_version = None
+manual_nazca_version = None #override auto nazca versioning if not Nonne.
 class ClsGDS():
     """Helper class to handle gdsii compatible export of masks."""
 
@@ -218,19 +254,29 @@ class ClsMatplotlib():
     def __init__(self):
         """Construct an object handling Matplotlib exports."""
 
-        try:
-            font = cfg.matplotlib_font
-        except:
-            font = {
-                #'family'  : 'normal',
-                'style'   : 'normal',
-                'weight' : 'light', #'light', 'normal', 'medium', 'semibold', 'bold', 'heavy', 'black'
-                'size'   : 24}
-        mplt.rc('font', **font)
+      #  try:
+      #      font = cfg.matplotlib_font
+      #
+      #  except:
+      #  font = {
+      #      #'family'  : 'normal',
+      #      'style'  : 'normal',
+      #      'weight' : 'light', #'light', 'normal', 'medium', 'semibold', 'bold', 'heavy', 'black'
+      #      'size'   : cfg.plt_fontsize}
+      #  mplt.rc('font', **font)
 
 
     def open(self, cell=None, title=None):
         """Inititialize Matplotlib mask output."""
+        font = {
+            #'family'  : 'normal',
+            'style'  : 'normal',
+            'weight' : 'light', #'light', 'normal', 'medium', 'semibold', 'bold', 'heavy', 'black'
+            'size'   : cfg.plt_fontsize}
+        mplt.rc('font', **font)
+
+
+
         self.cell = cell
 
         #print('TITLE', title)
@@ -250,7 +296,7 @@ class ClsMatplotlib():
         self.maxy = -1e6
         self.figsize = cfg.plt_figsize
 
-        # create a map of defined layer colors to speed up lookup
+        # create a map of type list of defined layer colors to speed up lookup
         self.layermap = defaultdict(list)
         if not cfg.colors.empty:
             for i, row in cfg.colors.loc[:, ['layer', 'datatype']].iterrows():
@@ -278,7 +324,7 @@ class ClsMatplotlib():
         Returns:
             None
         """
-        if layer == cfg.documentation_pin_layer:
+        if layer == cfg.default_layers['docu_pin']:
             return None
         polygon = None
         lay = (int(layer[0]), int(layer[1]))
@@ -411,7 +457,7 @@ class ClsMatplotlib():
             pin_ignore = cfg.pin_settings['bb_docu_pin_ignore']
         except:
             pin_ignore = []
-        if cfg.pin_settings['bb_pin_layer'] != cfg.documentation_pin_layer:
+        if cfg.pin_settings['bb_pin_layer'] != cfg.default_layers['docu_pin']:
             dt = 0.02*domain
             for name, pin in self.cell.pin.items():
                 if name == 'org' or\
@@ -656,10 +702,17 @@ class Export_layout():
     """Class to export a mask layout.
     """
 
-    def __init__(self):
+    def __init__(self, layermap=None, layermapmode='all'):
         self.gds_files = dict() # existing gds files used in the layout
         self.layermapmodes = ['none', 'all']
         self.reset()
+
+        #make sure hull layer is known
+        if cfg.export_hull:
+            if 'hull' in cfg.default_layers.keys():
+                get_layer(cfg.default_layers['hull'])
+
+        self.setlayermap(layermap=layermap, mode=layermapmode)
         return None
 
 
@@ -675,7 +728,7 @@ class Export_layout():
         self.bblock = False
         self.infolevel = 0
         self.show_cells = False
-        self.clear = False
+        self.clear = cfg.export_clear
         self.title = None
         self.output = None
         self._ascii = False #gds as ascii
@@ -689,6 +742,12 @@ class Export_layout():
         self.layermapmode = 'all'
         self.setlayermap()
         return None
+
+
+    def newtree(self):
+        """Create a Nazca export object."""
+        self._newtree = ClsNazca()
+        return self._newtree
 
 
     def setlayermap(self, layermap=None, mode='all'):
@@ -829,12 +888,19 @@ class Export_layout():
         return self._gds
 
 
-    def add_polygons(self, pgon_iter, level):
+    def add_polygons(self, pgon_iter=None, level=None, params=None):
         """Add polygons content to cell.
+
+        Args:
+            params (namedtuple): replaces all other parameters if not None
 
         Returns:
             None
         """
+        if params is not None:
+            pgon_iter = params.iters['polygon']
+            level = params.level
+
         for pgon, xy, bbox in pgon_iter:
             layer = self.layermap[pgon.layer]
             if layer is None:
@@ -848,18 +914,25 @@ class Export_layout():
             if self.svg:
                 SVG.add_polygon(layer, xy, bbox)
             if self.nazca:
-                self.CELL.add_polygon(layer, xy, bbox)
+                self.CELL.add_polygon(layer, xy)
         return None
 
 
-    def add_polylines(self, pline_iter, level):
+    def add_polylines(self, pline_iter=None, level=None, params=None):
         """Add polylines content to cell.
 
         In Matplotlib and svg output the polylines are converted to polygons.
 
+        Args:
+            params (namedtuple): replaces all other parameters if not None
+
         Returns:
             None
         """
+        if params is not None:
+            pline_iter = params.iters['polyline']
+            level = params.level
+
         for pline, xy, bbox in pline_iter:
             if self.gds:
                 GDS.content[level].append(
@@ -876,28 +949,58 @@ class Export_layout():
         return None
 
 
-    def add_annotations(self, anno_iter, level):
+    def add_annotations(self, anno_iter=None, level=None, create=False, cell=None, params=None):
         """Add annotation content to cell.
+
+        Args:
+            instantiate (bool): the instantiation level of the cell where
+               the annotation are from: To check for black boxes, which
+               can't be flattened.
+            params (namedtuple): replaces all other parameters if not None
 
         Returns:
             None
         """
+        if params is not None:
+            anno_iter = params.iters['annotation']
+            level = params.level
+            create = params.cell_create
+            cell = params.cell
+
         for anno, xy in anno_iter:
+            layer = int(anno.layer[0])
+            datatype = int(anno.layer[1])
+            if (layer, datatype) == cfg.default_layers['bb_name'] :
+                if not create:
+                    pass
+                    #print("ERROR: it's not allowed to flatten a black-box cell '{}'".format(cell.cell_name))
+                name = anno.text.split('\n')
+                if not cell.cell_name.startswith(name[0]):
+                    pass
+                    #print("ERROR: bb_name and cell_name of a black-box must be the same: '{}' != '{}'".\
+                    #    format(name, cell.cell_name))
             if self.gds:
                 GDS.content[level].append(
                     gbase.gds_annotation(xy=xy, string=anno.text,
-                        lay=int(anno.layer[0]), datatype=int(anno.layer[1])))
+                        lay=layer, datatype=datatype))
             if self.nazca:
-                self.CELL.add_annotation(anno, xy)
+                self.CELL.add_annotation(anno.text, anno.layer, xy)
         return None
 
 
-    def add_instances(self, instance_iter, level, infolevel=0):
+    def add_instances(self, instance_iter=None, level=None, infolevel=0, params=None):
         """Add instances to cell.
+
+        Args:
+            params (namedtuple): replaces all other parameters if not None
 
         Returns:
             None
         """
+        if params is not None:
+            instance_iter = params.iters['instance']
+            level = params.level
+
         for inode, [x, y, a], flip in instance_iter:
             cell = inode.cell
             if self.spt:
@@ -908,11 +1011,13 @@ class Export_layout():
                 SPT.add_line(cell, x, y, a, flip)
                 continue
 
-            if cell.instantiate:
+            if cell.instantiate and not self.flat:
+                #only add references for instantiated cells
                 if self.gds:
                     GDS.content[level].append(
                         gdsmod.cell_reference([x, y], cell.cell_name, a,
-                            flip=flip ^ inode.flip, array=inode.array))
+                            flip=flip ^ inode.flip, array=inode.array,
+                            mag=inode.scale))
                     #TODO: check: for external gds files in cells named "load_gds",
                     # the array setting needs to be transferred to the gds in this instance
                     # if instantiate is False on "load_gds".
@@ -923,7 +1028,7 @@ class Export_layout():
                         print('{}    instance array = {}'.format(level*tab, inode.array))
 
                 if self.nazca:
-                    self.CELL.add_instance()
+                    self.CELL.add_instance(inode, [x, y, a], flip)
         return None
 
 
@@ -966,7 +1071,7 @@ class Export_layout():
             mplt.ioff()
             #print('Switched of Matplotlib interactive output.')
         if self.nazca:
-            self.CELL = Celltree(instantiate=self.instantiate)
+            self.CELL = ClsNazca(instantiate=self.instantiate)
 
         cells_visited = set()
         for topcell in topcells:
@@ -980,40 +1085,29 @@ class Export_layout():
                 SPT.open(self.filename)
 
             NL = Netlist()
-            cells = NL.celltree_iter2(topcell, flat=self.flat,
+            cell_iter = NL.celltree_iter2(topcell, flat=self.flat,
                 cells_visited=cells_visited, infolevel=self.infolevel)
-            for action, params in cells:
-                if action == 'new':
-                    cell, create, level, trans, flip, levup = params
-                    if create: # take care of formats with cell hierarchy opening
+            for params in cell_iter:
+                if params.cell_start:
+                    if params.cell_create: #take care of formats with cell hierarchy opening
                         if self.gds:
-                            GDS.content[level] = []
-                            GDS.content[level].append(
-                                gdsmod.cell_open(cell.cell_name))
+                            GDS.content[params.level] = []
+                            GDS.content[params.level].append(
+                                gdsmod.cell_open(params.cell.cell_name))
                         if self.nazca:
-                            self.CELL.open(cell)
-
-                    infolevel = max(self.infolevel-1, 0)
-                    transflip = True
-                    params = cell.cnode, trans, flip, transflip, infolevel
-                    pgon_iter = NL.polygon_iter2(*params)
-                    pline_iter = NL.polyline_iter2(*params)
-                    anno_iter = NL.annotation_iter2(*params)
-                    instance_iter = NL.instance_iter2(*params)
-                    gdsfile_iter = NL.gdsfile_iter2(*params)
-                    self.add_polygons(pgon_iter, levup)
-                    self.add_polylines(pline_iter, levup)
-                    self.add_annotations(anno_iter, levup)
-                    self.add_instances(instance_iter, levup)
-                    self.add_gdsfiles(gdsfile_iter, levup)
-
-                elif action == 'close':
-                    inst, level = params
-                    if inst: # take care formats with cell hierarchy closing
+                            self.CELL.open(params)
+                    self.add_polygons(params.iters['polygon'], params.parent_level)
+                    self.add_polylines(params.iters['polyline'], params.parent_level)
+                    self.add_annotations(params.iters['annotation'], params.parent_level,
+                        create=params.cell_create, cell=params.cell)
+                    self.add_instances(params.iters['instance'], params.parent_level)
+                    self.add_gdsfiles(params.iters['gdsfile'], params.parent_level)
+                else:
+                    if params.cell_close: # take care of formats with cell hierarchy closing
                         if self.gds:
-                            GDS.content[level].append(gdsmod.cell_close())
-                            GDS.write(level)
-                            del GDS.content[level]
+                            GDS.content[params.level].append(gdsmod.cell_close())
+                            GDS.write(params.level)
+                            del GDS.content[params.level]
                         if self.nazca:
                             self.CELL.close()
 
@@ -1132,7 +1226,7 @@ class Export_layout():
 
 
 def clear_layout():
-    """Remove all cell references to start a new layout.
+    """Remove all cell references to start a brand new layout.
 
     A new topcell 'nazca' will be created.
 
@@ -1172,6 +1266,7 @@ def export_clear():
 #
 #==============================================================================
 def verify_topcells(topcells):
+    #return None
     if topcells is None:
         return None
     elif isinstance(topcells, Cell):
@@ -1204,10 +1299,14 @@ def rebuild(cell, instantiate=True, flat=False, layermap=None, layermapmode=None
     export.generate_layout(cell)
     return export.CELL.topcell
 
+def celltree_iter(cell, level=0, position=None, flat=False,
+         cells_visited=None, infolevel=0):
+    return Netlist().celltree_iter2(cell=cell, position=position, flat=flat,
+         cells_visited=cells_visited, infolevel=infolevel)
 
 def export(topcells=None,
         filename=None,
-        gds=True,
+        gds=False,
         ascii=False,
         plt=False,
         svg=False,
@@ -1216,7 +1315,7 @@ def export(topcells=None,
         infolevel=0,
         show_cells=False,
         info=True, #progress info
-        clear=True,
+        clear=None,
         title=None,
         output=None,
         path='',
@@ -1256,14 +1355,20 @@ def export(topcells=None,
     export.flat = flat
     export.spt = spt
     export.plt = plt
-    export.svg = svg
+    if svg and not cfg.SVGWRITE:
+        export.svg = False
+        print("Warning: could not load module 'svgwrite'. Skipping svg export.")
+    else:
+        export.svg = svg
     export.info = info
     export.title = title
     export.output = output
     export.path = path
     export.bblock = bb
-    export.clear = clear
-
+    if clear is None:
+        export.clear = cfg.export_clear
+    else:
+        export.clear = clear
     if export.info:
            print('Starting layout export...')
     if export.gds:
@@ -1278,12 +1383,13 @@ def export(topcells=None,
     if export.plt:
         if export.info:
             print('...matplotlib generation')
+        mplt.show()
     if export.svg:
         if info:
             print('...svg generation')
 
     export.generate_layout(topcells)
-    #print('Done.')
+    #print('done') do not want done in the notebook
     return None
 
 
@@ -1292,7 +1398,7 @@ def export_svg(topcells=None, title=None, path='', **kwargs):
         title=title, **kwargs)
 
 
-def export_plt(topcells=None, clear=True, title=None, output=None, path='', **kwargs):
+def export_plt(topcells=None, clear=None, title=None, output=None, path='', **kwargs):
     """Export layout with Matplotlib for all cells in <topcells>.
 
     Args:
@@ -1315,7 +1421,7 @@ def export_spt(topcells=None, filename=None):
         plt=False, gds=False, spt=True, info=True)
 
 
-def export_gds(topcells=None, filename=None, flat=False, spt=False, clear=True,
+def export_gds(topcells=None, filename=None, flat=False, spt=False, clear=None,
         bb=False, **kwargs):
     """Export layout to gds file for all cells in <topcells>.
 
@@ -1325,6 +1431,7 @@ def export_gds(topcells=None, filename=None, flat=False, spt=False, clear=True,
         filename (str): gds output filename (default = 'nazca_export.gds')
         flat (bool): export flat gds, i.e. no hierarchy (default = False)
         clear (bool): clear mask layout between consecutive exports (default = True)
+        bb (bool): Export design as a building block (default = False)'
 
     Returns:
         None
@@ -1334,19 +1441,16 @@ def export_gds(topcells=None, filename=None, flat=False, spt=False, clear=True,
         info=True, flat=flat, clear=clear, bb=bb, **kwargs)
 
 
+def layout(layermap=None, layermapmode='all'):
+    """Create a layout object for rebuilding cells.'
 
-def foo(topcell):
-    """Testing to create and print Nazca tree/netlist with pins to stdout."""
-    NL = Netlist()
-    cells = NL.celltree_iter2(topcell.cnode, flat=False, infolevel=0)
-    for action, params in cells:
-        if action == 'new':
-            cnode, create, level, trans, flip, levup = params
-            if create: # take care of cell hierarchy opening
-                print(cnode.cell.cell_name)
-                names = [k for k in cnode.cell.pin.keys()]
-                print("  ", names)
-                for name, node in cnode.cell.pin.items():
-                    n = [(E[0].cnode.cell.cell_name, E[0].name) for E in node.nb_geo]
-                    print("{} -> {}".format(name, n))
+    Returns:
+        Export_layout: layout object
+    """
+    ly = Export_layout(layermap=layermap, layermapmode=layermapmode)
+    ly.nazca = True
+    ly.CELL = ClsNazca(infolevel=0)
+    return ly
+
+
 

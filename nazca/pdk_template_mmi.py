@@ -30,7 +30,7 @@ OD_toStd = 1
 
 def Tp_Modefilter(length=98.15, width=36, pinwidth=None,
         name='modefilter', groupname='', xs=None,
-        icon=None):
+        icon=None, version=None, store_pins=False):
     """Template for Modefilter in different xsections.
 
     Returns:
@@ -45,6 +45,8 @@ def Tp_Modefilter(length=98.15, width=36, pinwidth=None,
         """
         with nd.Cell(hashme=True) as C:
             C.groupname = groupname
+            C.version = version
+            C.store_pins = store_pins
             pdk.addBBmap(name) # no OD_toStd
             nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, 0, 180)
             nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='optical').put(length)
@@ -60,7 +62,8 @@ def Tp_Modefilter(length=98.15, width=36, pinwidth=None,
 
 
 def Tp_MIR1p(length=40.2, width=35, pinwidth=None,
-        name='mir1p', groupname='', xs=None, icon=None):
+        name='mir1p', groupname='', xs=None, icon=None, version=None,
+        store_pins=False):
     """Template for MMI1x2 in different xsections.
 
     Returns:
@@ -75,6 +78,8 @@ def Tp_MIR1p(length=40.2, width=35, pinwidth=None,
         """
         with nd.Cell(hashme=True) as C:
             C.default_pins('a0', 'a0')
+            C.version = version
+            C.store_pins = store_pins
             C.groupname = groupname
             pdk.addBBmap(name, params=(OD_toStd))
             nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, 0, 180)
@@ -91,7 +96,8 @@ def Tp_MIR1p(length=40.2, width=35, pinwidth=None,
 
 
 def Tp_MIR2p(length=70.6, width=39, pinwidth=None, offset=1.5,
-        name='mir2p', groupname='', xs=None, icon=None):
+        name='mir2p', groupname='', xs=None, icon=None, version=None,
+        store_pins=False):
     """Template for MMI1x2 in different xsections.
 
     Returns:
@@ -106,6 +112,8 @@ def Tp_MIR2p(length=70.6, width=39, pinwidth=None, offset=1.5,
         """
         with nd.Cell(hashme=True) as C:
             C.default_pins('a0', 'a1')
+            C.version = version
+            C.store_pins = store_pins
             C.groupname = groupname
             pdk.addBBmap(name, params=( OD_toStd))
             nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, +offset, 180)
@@ -124,7 +132,8 @@ def Tp_MIR2p(length=70.6, width=39, pinwidth=None, offset=1.5,
 
 
 def Tp_MMI1x2(length, width, pinwidth=None, offset=0,
-        name='mmi1x2', groupname='', xs=None, icon=None):
+        name='mmi1x2', groupname='', xs=None, icon=None, version=None,
+        store_pins=False):
     """Template for MMI1x2 in different xsections.
 
      Returns:
@@ -139,6 +148,8 @@ def Tp_MMI1x2(length, width, pinwidth=None, offset=0,
             Cell"""
         with nd.Cell(hashme=True) as C:
             C.groupname = groupname
+            C.version = version
+            C.store_pins = store_pins
             pdk.addBBmap(name, params=(OD_toStd))
             nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, 0, 180)
             nd.Pin(name='b0', xs=xs['b0'], width=pinwidth['b0'], remark='optical').put(length, +offset)
@@ -155,7 +166,8 @@ def Tp_MMI1x2(length, width, pinwidth=None, offset=0,
 
 
 def Tp_MMI2x2(length, width, pinwidth=None, offset=0,
-        name='mmi2x2', groupname='', xs=None, icon=None):
+        name='mmi2x2', groupname='', xs=None, icon=None, version=None,
+        store_pins=False):
     """Template for MMI2x2.
 
     Returns:
@@ -173,6 +185,8 @@ def Tp_MMI2x2(length, width, pinwidth=None, offset=0,
         """
         with nd.Cell(hashme=True) as C:
             C.groupname = groupname
+            C.version = version
+            C.store_pins = store_pins
             pdk.addBBmap(name, params=(OD_toStd))
             nd.Pin(name='a0', xs=xs['a0'], width=pinwidth['a0'], remark='optical').put(0, offset[0], 180)
             nd.Pin(name='a1', xs=xs['a1'], width=pinwidth['a1'], remark='optical').put(0, offset[1], 180)

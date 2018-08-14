@@ -25,22 +25,25 @@ and from those the graphs/netlists of the design.
 """
 
 from itertools import count
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, namedtuple
 import copy as COPY
 from math import sin, cos, acos, pi, atan2
 
+from scipy.spatial import ConvexHull
 from numpy.linalg import inv
 from numpy import dot
 import numpy as np
 from pprint import pprint
 
+from .clipper import grow_polygons
 from . import cfg
 from .mask_layers import get_layer
-from .geometries import ring
+from .geometries import ring, transform
 from . import gds_import as gdsimp
 from . import gds_base as gb
 import nazca.trace as trace
 from nazca.pdk_template_core import put_boundingbox, bbox_pinnames
+from . import util
 
 
 Et = count(0) #counter for default cell names:
@@ -575,7 +578,7 @@ class Node():
     os = offset
 
 
-    def flip():
+    def flip(self):
         """Create a new Node that is flipped.
 
         A 'flip' mirrors the Node in the line of the pointer.
@@ -591,7 +594,7 @@ class Node():
         return node
 
 
-    def flop():
+    def flop(self):
         """Create a new Node that is flopped.
 
         A 'flop' mirrors the Node pointer 'backward'.
@@ -1168,6 +1171,7 @@ class Cell():
         self.bbox = None
         self.autobbox = autobbox
         self.bboxbuf= 0
+        self.version = None
         self.userbbox = None
         if store_pins is None:
             self.store_pins = cfg.store_pins
@@ -1308,14 +1312,14 @@ class Cell():
             * (pin_inst, (0, 0), pin_cell)
             * (pin_inst, (0, 0, 0), pin_cell)
         """
-
         if C1 is None:
             return instance.pin[self.default_in], cfg.cp, (0, 0, 0)
         elif isinstance(C1, Node):
             if not C1.cnode.ininstance and C1.cnode.cell.closed:
                 raise Exception("You are trying to connect to a close Cell object:\n"\
+                    "  The construction found is similar to\n"\
                     "  $ foo.put(cell.pin['a0']\n"\
-                    "  Connect to an instance of the cell instead, hence\n"\
+                    "  Connect not to the Cell but to an instance of the cell instead\n"\
                     "  $ instance = cell.put()\n"\
                     "  $ foo.put(instance.pin['a0])\n")
             return instance.pin[self.default_in], C1, (0, 0, 0)
@@ -1437,14 +1441,18 @@ class Cell():
             self.pin[name] = node_new
 
         C1, C2, C3, C4 = None, None, None, None
-        try: C1 = connect[0]
+        try:
+            C1 = connect[0]
+            try:
+                C2 = connect[1]
+                try:
+                    C3 = connect[2]
+                    try:
+                        C4 = connect[3]
+                    except: pass
+                except: pass
+            except: pass
         except: C1 = connect
-        try: C2 = connect[1]
-        except: pass
-        try: C3 = connect[2]
-        except: pass
-        try: C4 = connect[3]
-        except: pass
 
         node_exist, T = self.parse_pin_connection(C1, C2, C3, C4)
         connect_geo(node_exist, node_new, t=T, chain_node=1, chain_connect=0)
@@ -1455,11 +1463,11 @@ class Cell():
         """"Parse pinname and connect for put_polygon and put_gds methods.
 
         Returns:
-            Node"""
+            Node: pin position, new if needed"""
 
         if pinname is None:
             pinname = 'org'
-        if pinname not in cfg.cells[-1].pin.keys(): # connect to org and add new pin
+        if pinname not in cfg.cells[-1].pin.keys(): #add new pin w.r.t. org
             if connect is None: # org
                 node = self._put_pin(pinname, cfg.cells[-1].org)
             elif isinstance(connect, tuple): #(x,y,a)
@@ -1480,7 +1488,8 @@ class Cell():
             return node
 
 
-    def _put_polygon(self, connect=None, polygon=None):
+    def _put_polygon(self, connect=None, polygon=None, flip=False, flop=False,
+            scale=1.0):
         """Add a polygon to the cell.
 
         Args:
@@ -1491,12 +1500,16 @@ class Cell():
             None
         """
         node = self._put_pin(None, connect)
+        node.flip = flip
+        node.flop = flop
+        node.scale = scale
         if polygon is not None:
             self.polygons.append((node, polygon))
         return None
 
 
-    def _put_polyline(self, connect=None, polyline=None):
+    def _put_polyline(self, connect=None, flip=False, flop=False, polyline=None,
+        scale=1.0):
         """Add a polyline to the cell.
 
         Args:
@@ -1506,6 +1519,9 @@ class Cell():
         Returns:
             None"""
         node = self._put_pin(None, connect)
+        node.flip = flip
+        node.flop = flop
+        node.scale = scale
         if polyline is not None:
             self.polylines.append((node, polyline))
         return None
@@ -1543,7 +1559,7 @@ class Cell():
 
 
     I = 0
-    def _copy_cell2instance(self, parent_cnode, flip, flop, array=None):
+    def _copy_cell2instance(self, parent_cnode, flip, flop, array=None, scale=1.0):
         """Copy all nodes from the Cell into an Instance.
 
         Args:
@@ -1551,6 +1567,8 @@ class Cell():
             flip (bool): flip state of the instance.
             array (list): creates an array instance upon GDS output if not None.
                 Format the array as [col#, [dx1, dy1], row#, [dx2, dy2]]
+                dx1, dy1 is the column vector measured between adjacent elements.
+                dx2, dy2 is the row vector measured between adjacent elements.
                 (default = None)
 
         Returns:
@@ -1563,8 +1581,8 @@ class Cell():
         if array is not None:
             try:
                 A = array
-                array = [ A[0], [ A[1][0]*A[0], A[1][1]*A[0] ], \
-                          A[2], [ A[3][0]*A[2], A[3][1]*A[2] ] ]
+                array = [ A[0], [ A[1][0], A[1][1] ], \
+                          A[2], [ A[3][0], A[3][1] ] ]
                 if not self.instantiate:
                     print(
 "Warning: Trying to set array {} on cell '{}' with instantiate=False."\
@@ -1589,6 +1607,7 @@ class Cell():
         node.ininstance = True
         node.flip = flipflop
         node.array = array
+        node.scale = scale
         instance.cnode = node
         instance.cnode.parent_cnode = parent_cnode
         instance.pin['org'] = node
@@ -1621,7 +1640,7 @@ class Cell():
         return instance
 
 
-    def put(self, *args, flip=False, flop=False, array=None, **kwargs):
+    def put(self, *args, flip=False, flop=False, array=None, scale=1.0, **kwargs):
         """Instantiate a Cell object and put it in the active cell.
 
         Args:
@@ -1641,7 +1660,13 @@ class Cell():
                 (default = 'b0'). Example: cp='b1'
             array (list): creates an array instance upon GDS output if not None.
                 Format the array as [col#, [dx1, dy1], row#, [dx2, dy2]]
+                dx1, dy1 is the column vector measured between adjacent elements.
+                dx2, dy2 is the row vector measured between adjacent elements.
                 (default = None)
+            scale (float): set scaling factor of the instance (default = 1.0).
+                In gds the scaling will be set as instance attribute. In case
+                of flattening the instance, the scaling factor will be applied
+                to the instance content.
 
         Returns:
             Instance: reference to the instance of the cell being put
@@ -1707,7 +1732,7 @@ class Cell():
             print('ERROR: can not connect cell \'{}\' to itself.'.\
                 format(active_cell.cell_name))
 
-        instance = self._copy_cell2instance(parent_cnode, flip, flop, array)
+        instance = self._copy_cell2instance(parent_cnode, flip, flop, array, scale)
         nodeI, nodeC, T = self.parse_instance_connection(*C, instance=instance)
         if flop:
             T = (T[0], T[1], T[2]+180)
@@ -1791,7 +1816,7 @@ class Cell():
 
         L = []
         for g in self.polygons:
-            L.append('({g[1]}, {N})'.format(g=g, N=len(g[2])))
+            L.append('({g[1]}, {N})'.format(g=g, N=len(g[1].points)))
         s += ', '.join(L)
         s += '\n--gds     {:2}x (file, cell) = '.format(len(self.gdsfiles))
 
@@ -1808,29 +1833,37 @@ class Cell():
         return s + '\n'
 
 
-    def _polyshape_iter(self):
+    def _polyshape_iter(self, trans=Pointer(0), flip=False, scale=1.0):
         """Generator to iterate over all polylines and polygons.
 
         Yields:
-            (Pointer, list): (org, points)
+            Polygon | Polyline, list(float, float): poly object, transformed points
         """
-        for org, polygon in self.polygons:
-            yield org, polygon.points
-        for org, polyline in self.polylines:
-            yield org, polyline.points
+        pgon_iter = Netlist().polygon_iter2(self.cnode, trans,
+            flip=flip, scale=scale, apply=True, hull=True)
+        for pgon, xy, bbox in pgon_iter:
+            yield pgon, xy
+
+        pline_iter = Netlist().polyline_iter2(self.cnode, trans,
+            flip=flip, scale=scale, apply=True, hull=True)
+        for pline, xy, bbox in pline_iter:
+            yield pline, xy
 
 
-    def _solve(self, bbox=True):
-        """Solve the graph of the cell and calculate the bounding box.
+    def _calculate_bbox(self, bbox=True):
+        """Calculate the bounding box of a cell.
+
+        The bounding box can be based on the cell content or, if set, on a
+        user provided bbox outline.
 
         Args:
-            bbox (bool): Calculate the bounding box if True.
+            bbox (bool): Calculate the bounding box of if True (default = True).
 
         Returns:
             None
         """
-        if not cfg.solve_direct:
-            Netlist().solvecell(self)
+        limit = 1e8
+        self.bbox = (limit, limit, -limit, -limit)
 
         if self.userbbox is not None:
             ubox = np.array(self.userbbox).transpose()
@@ -1839,29 +1872,11 @@ class Cell():
             return None
 
         if bbox:
-            limit = 1e8
-            self.bbox = (limit, limit, -limit, -limit)
-            flip = False
-            s = 1
-            if flip:
-                s = -1
-
             elements = 0
-            for org, points in self._polyshape_iter():
+            hullarrs = []
+            for polyobj, xy, in self._polyshape_iter():
                 elements += 1
-                if flip:
-                    org = org.copy()
-                    org.flip()
-                [x0, y0, a0] = org.xya()
-                a = s*np.radians(a0)
-                #do not us bbox of the polyshape as that is a (rotated) rectangle
-                xy = np.array(points).transpose()
-                x = xy[0]*cos(a) - xy[1]*sin(a)
-                y = xy[0]*sin(a) + xy[1]*cos(a)
-                xybox = (x0+x.min(), y0+y.min(), x0+x.max(), y0+y.max())
-                self.bbox = (
-                    min(self.bbox[0], xybox[0]), min(self.bbox[1], xybox[1]),
-                    max(self.bbox[2], xybox[2]), max(self.bbox[3], xybox[3]))
+                hullarrs.append(xy)
 
             for cnode in self.cnode.instance_iter():
                 elements += 1
@@ -1871,48 +1886,69 @@ class Cell():
                 else:
                     s = 1
                 x0, y0, a0 = org.xya()
-                a = s*np.radians(a0)
+                a = np.radians(a0)
                 if cnode.cell.bbox is None:
                     self.bbox_complete = False
                     continue
                 x1, y1, x2, y2 = cnode.cell.bbox
-                xbl, xbr, xtl, xtr = cos(a)*x1-sin(a)*y1, cos(a)*x2-sin(a)*y2,\
-                                     cos(a)*x2-sin(a)*y1, cos(a)*x1-sin(a)*y2
-                ybl, ybr, ytl, ytr = sin(a)*x1+cos(a)*y1, sin(a)*x2+cos(a)*y2,\
-                                     sin(a)*x2+cos(a)*y1, sin(a)*x1+cos(a)*y2
+                S = cnode.scale
+                if hasattr(cnode.cell, 'hull'):
+                    bbhull = [(x0+S*(cos(a)*x-s*sin(a)*y),
+                              (y0+S*(sin(a)*x+s*cos(a)*y)))
+                        for x, y in cnode.cell.hull]
+                    hullarrs.append(bbhull)
+                    if cnode.array is not None:
+                        Nx, (x1, y1), Ny, (x2, y2) = cnode.array
+                        hullarrs.append([((Nx-1)*x1+x, (Nx-1)*y1+y) for x, y in bbhull])
+                        hullarrs.append([((Ny-1)*x2+x, (Ny-1)*y2+y) for x, y in bbhull])
+                        hullarrs.append([((Nx-1)*x1+(Ny-1)*x2+x, (Nx-1)*y1+(Ny-1)*y2+y) for x, y in bbhull])
 
-                xmin = min(xbl, xbr, xtl, xtr)
-                ymin = min(s*ybl, s*ybr, s*ytl, s*ytr)
-                xmax = max(xbl, xbr, xtl, xtr)
-                ymax = max(s*ybl, s*ybr, s*ytl, s*ytr)
+            if hullarrs:
+                try:
+                    H = ConvexHull(np.concatenate(hullarrs))
+                    self.bbox = (
+                        min(self.bbox[0], H.min_bound[0]), min(self.bbox[1], H.min_bound[1]),
+                        max(self.bbox[2], H.max_bound[0]), max(self.bbox[3], H.max_bound[1]))
+                    self.hull = np.take(H.points, H.vertices, axis=0)
+                    if cfg.export_hull:
+                        Polygon(self.hull, layer=cfg.default_layers['hull']).put(0)
+                except:
+                    pass
+                    #print('no hull', self.cell_name) #probably 1D polygons, like strt(length=0)
 
-                if cnode.array is not None:
-                    Nx, (x1, y1), Ny, (x2, y2) = cnode.array
-                    Xmin = min(0, (Nx-1)*x1/Nx, (Ny-1)*x2/Ny, (Nx-1)*x1/Nx+(Ny-1)*x2/Ny)
-                    Ymin = min(0, (Nx-1)*y1/Nx, (Ny-1)*y2/Ny, (Nx-1)*y1/Nx+(Ny-1)*y2/Ny)
-                    Xmax = max(0, (Nx-1)*x1/Nx, (Ny-1)*x2/Ny, (Nx-1)*x1/Nx+(Ny-1)*x2/Ny)
-                    Ymax = max(0, (Nx-1)*y1/Nx, (Ny-1)*y2/Ny, (Nx-1)*y1/Nx+(Ny-1)*y2/Ny)
-                else:
-                    Xmin, Ymin, Xmax, Ymax = 0, 0, 0, 0
-
+            if elements == 0:
+                self.bbox_complete = False
+                self.bbox = None
+            else:
                 self.bbox = (
-                    min(self.bbox[0], x0 + xmin + Xmin),
-                    min(self.bbox[1], y0 + ymin + Ymin),
-                    max(self.bbox[2], x0 + xmax + Xmax),
-                    max(self.bbox[3], y0 + ymax + Ymax))
-
-            self.bbox = (
                 self.bbox[0] - self.bboxbuf,
                 self.bbox[1] - self.bboxbuf,
                 self.bbox[2] + self.bboxbuf,
                 self.bbox[3] + self.bboxbuf)
-            if elements == 0:
-                self.bbox_complete = False
-                self.bbox = None
-
-            #print("\n-- bbox: '{}': ({:.3f}, {:.3f}, {:.3f}, {:.3f})".\
-            #     format(self.cell_name, *self.bbox ))
+                #print("\n-- bbox: '{}': ({:.3f}, {:.3f}, {:.3f}, {:.3f})".\
+                #    format(self.cell_name, *self.bbox ))
         return None
+
+
+    def _store_pins(self):
+        """Store pin information in annotation.
+
+        Returns:
+            None
+        """
+        pintxt = 'pins:\n'
+        for name, node in sorted(self.pin.items()):
+            if node.xs is None:
+                xs = 'None'
+            else:
+                xs = None
+            if node.width is None:
+                w = 'None'
+            else:
+                w = "{:.3f}".format(float(node.width))
+            pintxt += '{0}: {c[0]:.5f}, {c[1]:.5f}, {c[2]:.5f}, {xs}, {w}\n'.\
+                format(name, xs=xs, w=w, c=node.xya())
+        Annotation(text=pintxt, layer=cfg.default_layers['pin_text']).put(0)
 
 
     def close(self):
@@ -1927,7 +1963,7 @@ class Cell():
             Cell: self
         """
         if self.closed:
-            print('Cell \'{}\' already closed.'.format(self.cell_name))
+            print('\nError: Cell \'{}\' already closed.'.format(self.cell_name))
 
         #add default ports if missing:
         if self.default_in not in self.pin:
@@ -1943,7 +1979,9 @@ class Cell():
         self.pinin = self.pin[self.default_in]
         self.pinout = self.pin[self.default_out]
         self.bbox_complete = True
-        self._solve(bbox=True)
+        if not cfg.solve_direct:
+            Netlist().solvecell(self)
+        self._calculate_bbox(bbox=True)
         if self.autobbox:
             if self.bbox is None:
                 print("Warning: Can't determine a bounding box for cell '{}',"\
@@ -1963,21 +2001,15 @@ class Cell():
                 width = self.bbox[3] - self.bbox[1]
                 put_boundingbox('org', length=length, width=width,
                     move=(self.bbox[0], self.bbox[1]+0.5*width, 0))
-        self._solve(bbox=False)
+            if not cfg.solve_direct:
+                Netlist().solvecell(self)
+
         if self.store_pins:
-            pintxt = 'pins:\n'
-            for name, node in sorted(self.pin.items()):
-                if node.xs is None:
-                    xs = 'None'
-                else:
-                    xs = None
-                if node.width is None:
-                    w = 'None'
-                else:
-                    w = "{:.3f}".format(node.width)
-                pintxt += '{0}: {c[0]:.5f}, {c[1]:.5f}, {c[2]:.5f}, {xs}, {w}\n'.\
-                    format(name, xs=xs, w=w, c=node.xya())
-            Annotation(text=pintxt, layer=cfg.default_layers['pin_text']).put(0)
+            self._store_pins()
+
+        if cfg.store_bbname and self.instantiate and self.version is not None:
+            bbtxt = "{}\n{}".format(self.cell_basename, self.version)
+            Annotation(text=bbtxt, layer=cfg.default_layers['bb_name']).put(0)
 
         self.closed = True
 
@@ -1986,7 +2018,6 @@ class Cell():
         if cfg.cells:
             cfg.self = cfg.cells[-1]
         return self
-
 
 
 def diff(node1, node2):
@@ -2016,16 +2047,35 @@ def diff(node1, node2):
 def midpoint(node1, node2):
     """Calculate the geometrical center between two nodes.
 
+    See also midpointer.
+
     Args:
         node1 (Node): start node
         node2 (Node): end node
 
     Returns:
-        (x, y, a): mid-point between pointers of <node1> and <node2>.
+        (x, y, a): mid-point between pointers of <node1> and <node2>
     """
     x1, y1, a1 = node1.xya()
     x2, y2, a2 = node2.xya()
     return x1+(x2-x1)/2, y1+(y2-y1)/2, a1+(a2-a1)/2
+
+
+def midpointer(node1, node2):
+    """Calculate the geometrical center between two nodes.
+
+    See also midpoint.
+
+    Args:
+        node1 (Node): start node
+        node2 (Node): end node
+
+    Returns:
+        Pointer: pointer in mid-point between pointers of <node1> and <node2>
+    """
+    x1, y1, a1 = node1.xya()
+    x2, y2, a2 = node2.xya()
+    return Pin().put(x1+(x2-x1)/2, y1+(y2-y1)/2, a1+(a2-a1)/2)
 
 
 def bbinfo(item=None, data=None):
@@ -2111,8 +2161,15 @@ class Polygon():
         """
         self.layer = get_layer(layer)
         self.points = points
-        xy = list(zip(*points))
-        self.bbox = (min(xy[0]), min(xy[1]), max(xy[0]), max(xy[1]))
+        try:
+            H = ConvexHull(points)
+            self.hull = np.take(H.points, H.vertices, axis=0)
+            self.bbox = [H.min_bound[0], H.min_bound[1], H.max_bound[0], H.max_bound[1]]
+        except Exception as e:
+            #less than 2D polygon, e.g. a zero length straight
+            #print("CovexHull Error Polygon: {}\n{}".format(e, points))
+            xy = list(zip(*points))
+            self.bbox = (min(xy[0]), min(xy[1]), max(xy[0]), max(xy[1]))
 
     def __repr__(self):
         try:
@@ -2122,9 +2179,54 @@ class Polygon():
         return "<Polygon() object, layer={}, points={}, bbox={}>".\
             format(self.layer, size, self.bbox)
 
-    def put(self, *args):
-        """Put a Polygon object in the layout."""
-        return cfg.cells[-1]._put_polygon(connect=args, polygon=self)
+
+    def transform(self, center=(0, 0, 0), scale=1.0,
+        flipx=False, flipy=False, move=(0, 0, 0), layer=None):
+        """Transform the points in the Polygon object.
+
+        See nazca.geometries.transform().
+
+        Returns:
+            Polygon: new Polygon with transformed points.
+        """
+        if layer is None:
+            layer = self.layer
+        points = transform(points=self.points, center=center, scale=scale,
+            flipx=flipx, flipy=flipy, move=move)
+        newPolygon = Polygon(points=points, layer=layer)
+        return newPolygon
+
+
+    def grow(self, grow=5, accuracy=0.1, jointype='square', layer=None):
+        """Grow the polygon.
+
+        Returns:
+            Polygon: new Polygon with growth applied.
+        """
+        if layer is None:
+            layer = self.layer
+        points = grow_polygons(paths=[self.points], grow=grow, accuracy=accuracy,
+            jointype=jointype)
+        newPolygon = Polygon(points=points[0], layer=layer)
+        return newPolygon
+
+
+    def put(self, *args, flip=False, flop=False, scale=1.0):
+        """Put a Polygon object in the layout.
+
+        Args:
+            flip (bool): flip state of the polygon put
+            flop (bool): flop state of the polygon put
+            scale (float): scaling factor of the Polygon. This scaling looks
+                as if the whole cell the polygon would have scaled.
+                Note that it may be more appropiate to use
+                the 'transform' method to scale a Polygon.
+
+        Returns:
+
+        """
+        return cfg.cells[-1]._put_polygon(connect=args, flip=flip, flop=flop,
+            scale=scale, polygon=self)
 
 
 class Polyline():
@@ -2150,8 +2252,16 @@ class Polyline():
             self.width = 0.20
         self.pathtype = pathtype
         self.points = points
-        xy = list(zip(*points))
-        self.bbox = (min(xy[0]), min(xy[1]), max(xy[0]), max(xy[1]))
+        try:
+            xy = util.polyline2polygon(self.points, width=self.width, miter=0.5)
+            H = ConvexHull(xy)
+            self.hull = np.take(H.points, H.vertices, axis=0)
+            self.bbox = [H.min_bound[0], H.min_bound[1], H.max_bound[0], H.max_bound[1]]
+        except Exception as e:
+            #print("CovexHull Error Polyline:", e)
+            xy = list(zip(*points))
+            self.bbox = (min(xy[0]), min(xy[1]), max(xy[0]), max(xy[1]))
+
 
     def __repr__(self):
         try:
@@ -2162,9 +2272,61 @@ class Polyline():
             "points={}, bbox={}>".\
             format(self.layer, self.width, self.pathtype, size, self.bbox)
 
-    def put(self, *args):
-        """Put a Polyline object in the layout."""
-        return cfg.cells[-1]._put_polyline(connect=args, polyline=self)
+
+    def transform(self, center=(0, 0, 0), scale=1.0,
+        flipx=False, flipy=False, move=(0, 0, 0), width=None, pathtype=None,
+            layer=None):
+        """Transform the points in the Polyline object.
+
+        See nazca.geometries.transform().
+
+        Returns:
+            Polyline: new Polyline with transformed points.
+        """
+        if layer is None:
+            layer = self.layer
+        if width is None:
+            width = self.width
+        if pathtype is None:
+            pathtype = self.pathtype
+        points = transform(points=self.points, center=center, scale=scale,
+            flipx=flipx, flipy=flipy, move=move)
+        newPolyline = Polyline(points=points, width=width, pathtype=pathtype,
+            layer=layer)
+        return newPolyline
+
+
+    def grow(self, grow=5, accuracy=0.1, jointype='square', width=None,
+            layer=None):
+        """Grow the polyline.
+
+        Returns:
+            Polyline: new Polyline with growth applied.
+        """
+        if layer is None:
+            layer = self.layer
+        points = grow_polygons(paths=[self.points], grow=grow, accuracy=accuracy,
+            jointype=jointype)
+        newPolyline = Polyline(points=points[0], layer=layer)
+        return newPolyline
+
+
+    def put(self, *args, flip=False, flop=False, scale=1.0):
+        """Put a Polyline object in the layout.
+
+        Args:
+            flip (bool): flip state of the polygon put
+            flop (bool): flop state of the polygon put
+        scale (float): scaling factor of the Polygon. This scaling looks
+                as if the whole cell the polygon would have scaled.
+                Note that it may be more appropiate to use
+                the 'transform' method to scale a Polygon.
+
+        Returns:
+
+        """
+        return cfg.cells[-1]._put_polyline(connect=args, flip=flip, flop=flop,
+            scale=scale, polyline=self)
 
 
 class Annotation():
@@ -2197,7 +2359,7 @@ class Annotation():
 
 
 def _scan_branch(strm, cellname, celllist=None, level=0):
-    """Generator for cell names in a branch. Deepest first."""
+    """Generator for cell names in a branch. Bottom-up, deep first."""
 
     cell_rec = strm.cells[cellname]
     snames = cell_rec.snames
@@ -2206,7 +2368,6 @@ def _scan_branch(strm, cellname, celllist=None, level=0):
         level += 1
         for sname in snames:
             yield from _scan_branch(strm, sname, level=level)
-            #print("{}{}".format("  "*level, sname))
         level -= 1
     yield(cellname)
 
@@ -2245,24 +2406,30 @@ def _string_to_pins(string):
 
 
 def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0,
-        scale=1.0):
+        scale=1.0, flat=False, instantiate=True):
     """Translate a GDS stream into native native Nazca cell structure.
 
     If no cellname is provided it will select the topcell if there is only
     one topcell.
 
     Args:
-        filename (str): gds filename
-        cellname (str): cellname (and under) to process
-
-        native: (bool):  create native Nazca cells from GDS
+        strm (bytestr): gds layout
+        topcellname (str): name of topcell to process
+        cellmap (dict): cellname (and under) to process
+        bbox (bool): Add bounding box if True (default = False)
+        bboxbuf (float): extra buffer space added to the bbox (default = 0)
+        scale (float): scaling of the cells (default = 1.0)
+        flat (bool): set instantiation off all subcells. (default = False)
+        instantiate (bool): instantiation setting of the topcell. (default = True)
 
     Returns:
         list of str: list of cellnames in <filename> under cell name <cellname>
     """
-    um = 1000/scale # scale factor between gds integers and micro-meters.
+    annotated_cells = []
+    um0 = 1000
+    um = um0/scale # scale factor between gds integers and micro-meters.
     NC = {}
-    elements_unknown = set()
+    gds_elements_unknown = set()
     cells_visited = set()
     branch_iter = _scan_branch(strm, topcellname)
     for cellname in branch_iter:
@@ -2270,9 +2437,14 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0,
             continue
         cells_visited.add(cellname)
         cellrecord = strm.cells[cellname]
-        with Cell(cellname) as C:
-           C.default_pins('org', 'org')
-           for elem in cellrecord.elements:
+        if cellname == topcellname:
+            _instantiate = instantiate
+        else:
+            _instantiate = True
+        with Cell(cellname, instantiate=_instantiate) as C:
+            C.default_pins('org', 'org')
+            for elem in cellrecord.elements:
+
                 if elem.etype == gb.GDS_record.BOUNDARY:
                     LD, XY = elem.polygon
                     XY = [(x/um, y/um) for x, y, in zip(*[iter(XY)]*2)]
@@ -2290,6 +2462,7 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0,
                     LD, XY, TEXT = elem.annotation
                     XY = (XY[0]/um, XY[1]/um)
                     Annotation(layer=LD, text=TEXT).put(XY)
+                    #TODO: also check for the layer
                     if TEXT[:4].lower() == 'pins':
                         pins = _string_to_pins(TEXT)
                         for name, (x, y, a, xs, w) in pins.items():
@@ -2301,11 +2474,25 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0,
                             if isinstance(w, str):
                                 if w.lower() == 'none':
                                     w = None
+                            if cellname == topcellname:
+                                x, y = x*scale, y*scale
                             Pin(name=name, xs=xs, width=w).put(x, y, a)
-                            print(name, x, y, a, xs, w)
+                            #print(name, x, y, a, xs, w)
+                    if LD == cfg.default_layers['bb_name']:
+                        Annotation(layer=LD, text=TEXT).put(XY)
+                        annotated_cells.append(C)
+                        try:
+                            bbname, bbversion = TEXT.split('\n')
+                            C.annotated_name = bbname    # store cell name
+                            C.annotated_version = bbversion # store version
+                            #print('BB ID found:\n{}'.format(TEXT))
+                        except Exception as e:
+                            pass
+                            #print("ERROR: (netist): No valid black box"\
+                            #    " annotation in layer {}: {}".format(LD, e))
 
                 elif elem.etype == gb.GDS_record.BOX:
-                    elements_unknown.add('BOX')
+                    gds_elements_unknown.add('BOX')
 
                 elif elem.etype == gb.GDS_record.SREF:
                     name, trans, mag, angle, XY = elem.instance
@@ -2313,7 +2500,8 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0,
                         flip = True
                     else:
                         flip = False
-                    NC[name].put(XY[0]/um, XY[1]/um, angle, flip=flip, scale=mag)
+                    NC[name].put(XY[0]/um, XY[1]/um, angle, flip=flip,
+                        scale=mag)
 
                 elif elem.etype == gb.GDS_record.AREF:
                     name, trans, mag, angle, col, row, XY = elem.array
@@ -2330,16 +2518,18 @@ def _gds2native(strm, topcellname=None, cellmap=None, bbox=False, bboxbuf=0,
                         array=(col, (dx1, dy1), row, (dx2, dy2)),
                         flip=flip, scale=mag)
                 else:
-                    elements_unknown.add(elem.etype)
-           if (cellname == topcellname) and bbox:
-               C.autobbox = True
-               C.bboxbuf = bboxbuf
+                    gds_elements_unknown.add(elem.etype)
+            if cellname == topcellname:
+                if bbox:
+                    C.autobbox = True
+                    C.bboxbuf = bboxbuf
         NC[cellname] = C
 
-    if elements_unknown:
-        elist= ["{}({})".format(gb.GDS_record.name[e], e) for e in elements_unknown]
+    if gds_elements_unknown:
+        elist= ["{}({})".format(gb.GDS_record.name[e], e) for e in gds_elements_unknown]
         print("Warning: gds2nazca: Ignoring elements in cell (branch) '{}': {}".\
             format(cellname, ", ".join(elist)))
+    cfg.annotated_cells = annotated_cells
     return C
 
 
@@ -2364,8 +2554,8 @@ def print_structure(filename, cellname, level=0):
 
 
 def load_gds(filename, cellname=None, newcellname=None, layermap=None,
-        cellmap=None, scale=1.0, prefix='', instantiate=False, native=True,
-        bbox=False, bboxbuf=0, connect=None):
+        cellmap=None, scale=1.0, prefix='', instantiate=True, native=True,
+        bbox=False, bboxbuf=0, connect=None, flat=False):
     """Load GDS cell <celllname> (and its instances) from <filename> into a Nazca cell.
 
     This method checks for cellname clashes, i.e. a cell(tree)
@@ -2393,17 +2583,22 @@ def load_gds(filename, cellname=None, newcellname=None, layermap=None,
         layermap (dict): layer mapping {old_layernumber: new_layernumber}
         cellmap (dict): ceelname mapping {old_cellname: new_cellname}
         scale (float): scaling factor of the cell (default=1.0).
+            Scaling in this function will be applied directly to the polygon
+            structures, not as a modifier attribute like scaling/magnification
+            on a gds instance. For the latter use the scale keyword in 'put()'.
             Warning, use scaling with care and basically only on structures
-            like logos. Avoid (do not) use on library building blocks and/or
-            optical components as functionality may be compromised.
+            like logos and text. Avoid (do not) use on library building
+            blocks and/or optical components as their functionality may be
+            compromised by scaling.
         prefix (str): optional string to avoid name clashes (default = '')
         instantiate (bool): instantiate the GDS (default = False)
         native (bool): create native Nazca cells from GDS (default = True).
             Native cells provide full access to all elements in the gds.
         bbox (bool): add bounding box if True (default = False)
         bboxbuf (float): add a buffer to the bounding box (default = 0)
-        connect (float, float, float): Only for native=False,
+        connect ((float, float, float)): Only for native=False,
             move GDS origin by (x, y, a) when putting it into the layout.
+        moveorg ((float, float, float)): alternative name for connect
 
     Returns:
         Cell: Nazca Cell containing the loaded gds cell(tree)
@@ -2472,7 +2667,6 @@ Cell name '{3}' in file '{1}' {4}is already in use in the design.
         if not native: # or Cell will see it as existing.
             cfg.cellnames[cellmap[name]] = 'loaded_gds_cell'
 
-
     strm = gdsimp.GDSII_stream(filename, layermap=layermap, cellmap=cellmap)
 
     #create cell:
@@ -2481,7 +2675,8 @@ Cell name '{3}' in file '{1}' {4}is already in use in the design.
         #    print("Warning: Scaling not applied for load_gds with native=True;"\
         #        " scale={} will be ignored in cell '{}'.".format(scale, topcellname))
         maskcell = _gds2native(strm=strm, topcellname=cellmap[topcellname],
-            cellmap=cellmap, bbox=bbox, bboxbuf=bboxbuf, scale=scale)
+            cellmap=cellmap, bbox=bbox, bboxbuf=bboxbuf, scale=scale,
+            flat=flat, instantiate=instantiate)
     else:
         with Cell('load_gds', celltype='mask', instantiate=instantiate) as maskcell:
             maskcell._put_gds(
@@ -2668,20 +2863,27 @@ class Netlist:
 # =============================================================================
 # Cell-element iterators WITH translation and flipping performed
 # =============================================================================
-    def polygon_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+    def polygon_iter2(self, cnode, trans, flip, scale, apply=True,
+            hull=False, infolevel=0):
         """Generator to iterate over all polygons in a cell (cnode).
 
         Args:
-            cnode (Node): cnode to iterate
-            trans (tuple): translation state of instance
-            flip (bool): flip state of instance
-            apply (bool): default=True: Apply translation and flipping
-            infolevel (int): amount of debug info to display in stdout
+            cnode (Node): cnode
+            trans (tuple): translation state w.r.t. to (new) parent
+            flip (bool): flip state w.r.t. to (new) parent
+            scale (float): scale state w.r.t. to (new) parent
+            apply (bool): apply translation and flipping (default = True)
+            infolevel (int): debug info level to stdout
 
         Yields:
-            (Polygon, (float, float, float)):
-                Next Polygon object and its position (x, y, a), 'a' in radians,
-                and a flip multiplyer -1 (flip) or 1
+            (Polygon, list((float, float)), tuple(4*float)) |
+            (Polygon, tuple(3*float), tuple(4*float)):
+                if apply is True:
+                Polygon object, and the polygon points and the bbox w.r.t.
+                the (possibly new) parent cell.
+                if apply is False:
+                Polygon object, its position (x, y, a), 'a' in radians,
+                the flip state of the polygon
         """
         for node, pgon in cnode.cell.polygons:
             if infolevel > 1:
@@ -2694,6 +2896,11 @@ class Netlist:
                     bx=pgon.bbox[2]-pgon.bbox[0],
                     by=pgon.bbox[3]-pgon.bbox[1]))
             org = node.pointer.copy()
+            nflip, nflop = 1, 1
+            if node.flip:
+                nflip = -1
+            if node.flop:
+                nflop = -1
             s = 1
             if flip:
                 s = -1
@@ -2701,35 +2908,47 @@ class Netlist:
                 org.flip()
             [x, y, a] = org.multiply_ptr(trans).xya()
             a = s*np.radians(a)
-
+            scale_tot = scale * node.scale
+            if hull and hasattr(pgon, 'hull'):
+                points = pgon.hull
+            else:
+                points = pgon.points
             if apply:
-                if [x, y, a] != [0, 0, 0]:
-                    xy = [(x+cos(a)*u-sin(a)*v, y+s*(sin(a)*u+cos(a)*v))
-                        for u, v in pgon.points]
+                if [x, y, a] != [0, 0, 0] or nflip == -1 or nflop == -1 or \
+                        scale_tot != 1.0:
+                    xy = [(x+scale_tot*(cos(a)*nflip*u-sin(a)*nflop*v),
+                           y+scale_tot*s*(sin(a)*nflip*u+cos(a)*nflop*v))
+                        for u, v in points]
                 else:
-                    xy = pgon.points
-                x1, y1, x2, y2 = pgon.bbox
-                bbox = ( x+cos(a)*x1-sin(a)*y1, y+s*(sin(a)*x1+cos(a)*y1),
-                         x+cos(a)*x2-sin(a)*y2, y+s*(sin(a)*x2+cos(a)*y2) )
+                    xy = points
+                xyT = list(zip(*xy))
+                bbox = (min(xyT[0]), min(xyT[1]), max(xyT[0]), max(xyT[1]))
                 yield pgon, xy, bbox
             else:
                 yield pgon, [x, y, a], s
 
 
-    def polyline_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+    def polyline_iter2(self, cnode, trans, flip, scale, apply=True,
+            hull=False, infolevel=0):
         """Generator to iterate over all polylines in a cell (cnode).
 
         Args:
-            cnode (Node): cnode to iterate
-            trans (tuple): translation state of instance
-            flip (bool): flip state of instance
-            apply (bool): default=True: Apply translation and flipping
-            infolevel (int): amount of debug info to display in stdout
+            cnode (Node): cnode
+            trans (tuple): translation state w.r.t. to (new) parent
+            flip (bool): flip state w.r.t. to (new) parent
+            scale (float): scale state w.r.t. to (new) parent
+            apply (bool): apply translation and flipping (default = True)
+            infolevel (int): debug info level to stdout
 
-        Yields:
-            (Polyline, (float, float, float)):
-                Next Polyline object and its position (x, y, a), 'a' in radians,
-                and a flip multiplyer -1 (flip) or 1
+           Yields:
+            (Polyline, list((float, float)), tuple(4*float)) |
+            (Polyline, tuple(3*float), tuple(4*float)):
+                if apply is True:
+                Polyline object, and the polyline points and the bbox w.r.t.
+                the (possibly new) parent cell.
+                if apply is False:
+                Polyline object, its position (x, y, a), 'a' in radians,
+                the flip state of the polyline
         """
         for node, pline in cnode.cell.polylines:
             if infolevel > 1:
@@ -2742,6 +2961,11 @@ class Netlist:
                     bx=pline.bbox[2]-pline.bbox[0],
                     by=pline.bbox[3]-pline.bbox[1]))
             org = node.pointer.copy()
+            nflip, nflop = 1, 1
+            if node.flip:
+                nflip = -1
+            if node.flop:
+                nflop = -1
             s = 1
             if flip:
                 s = -1
@@ -2749,22 +2973,27 @@ class Netlist:
                 org.flip()
             [x, y, a] = org.multiply_ptr(trans).xya()
             a = s*np.radians(a)
-
+            scale_tot = scale * node.scale
+            if hull and hasattr(pline, 'hull'):
+                points = pline.hull
+            else:
+                points = pline.points
             if apply:
-                if [x, y, a] != [0, 0, 0]:
-                    xy = [(x+cos(a)*u-sin(a)*v, y+s*(sin(a)*u+cos(a)*v))
-                        for u, v in pline.points]
+                if  [x, y, a] != [0, 0, 0] or nflip == -1 or nflop == -1 or\
+                        scale_tot != 1.0:
+                    xy = [(x+scale_tot*(cos(a)*nflip*u-sin(a)*nflop*v),
+                           y+scale_tot*s*(sin(a)*nflip*u+cos(a)*nflop*v))
+                        for u, v in points]
                 else:
-                    xy = pline.points
-                x1, y1, x2, y2 = pline.bbox
-                bbox = ( x+cos(a)*x1-sin(a)*y1, y+s*(sin(a)*x1+cos(a)*y1),
-                         x+cos(a)*x2-sin(a)*y2, y+s*(sin(a)*x2+cos(a)*y2) )
+                    xy = points
+                xyT = list(zip(*xy))
+                bbox = (min(xyT[0]), min(xyT[1]), max(xyT[0]), max(xyT[1]))
                 yield pline, xy, bbox
             else:
                 yield pline, [x, y, a], s
 
 
-    def annotation_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+    def annotation_iter2(self, cnode, trans, flip, scale, apply=True, infolevel=0):
         """Generator to iterate over all annotations in a cell (cnode).
 
         Args:
@@ -2798,7 +3027,7 @@ class Netlist:
             yield anno, xy
 
 
-    def instance_iter2(self, cnode, trans, flip, apply=True, infolevel=0):
+    def instance_iter2(self, cnode, trans, flip, scale, apply=True, infolevel=0):
         """Generator to iterate over all instances one level deep.
 
         Args:
@@ -2824,7 +3053,7 @@ class Netlist:
                 yield nn[0], [x, y, a], flip
 
 
-    def gdsfile_iter2(self, cnode, trans, flip, apply, infolevel=0):
+    def gdsfile_iter2(self, cnode, trans, flip, scale, apply, infolevel=0):
         """Generator to iterate over all GDS files instantiated in a cell (cnode).
 
         Args:
@@ -2854,10 +3083,10 @@ class Netlist:
 # =============================================================================
     def celltree_iter(self, cnode, level=0, position=None, flat=False,
             infolevel=0):
-        """Generator to iterate over the cell under <cnode>, deep-first.
+        """Generator to iterate over cell of <cnode>, top-down, go deep first.
 
-        The tree decents from a cell cnode into an instance cnode.
-        For decending further into an instance:
+        The tree decents from the provided cnode into instantiated cnode(s).
+        For decending into an instance:
         - look up the cell object the instance represents,
         - take that cell's cnode and use it to seed the next level.
 
@@ -2873,6 +3102,11 @@ class Netlist:
                 Yields next cell, its level in the hierarchy and position
         """
         flip = cnode.flip
+        try:
+            scale = cnode.scale
+        except:
+            scale = 1.0
+
         cnodeC = cnode.cell.cnode #get cell cnode for cell or instance
         self.cnodes_visited.add(cnodeC)
 
@@ -2900,7 +3134,7 @@ class Netlist:
                         org2.set_a(0)
                         org2.move(xi*dx1+yi*dx2, xi*dy1+yi*dy2)
                         org2.set_a(a)
-                    yield cnodeC, level, org2, flip
+                    yield cnodeC, level, org2, flip, scale
                     cnode_iter = cnodeC.instance_iter()
                     for nextcnode in cnode_iter:
                         if cnode.cell is not None:
@@ -2920,7 +3154,7 @@ class Netlist:
                                 infolevel)
 
         else:
-            yield cnodeC, level, position, flip
+            yield cnodeC, level, position, flip, scale
             cnode_iter = cnodeC.instance_iter()
             for nextcnode in cnode_iter:
                 if cnode.cell is not None:
@@ -2939,60 +3173,102 @@ class Netlist:
                         flat,
                         infolevel)
 
-
     def celltree_iter2(self, cell, level=0, position=None, flat=False,
-            cells_visited=None, infolevel=0):
-        """Generator to iterate over celltree with translation, flipping and flattening.
+            cells_visited=None, infolevel=0, cellmap=None):
+        """Generator to iterate top-down over the celltree in <cell>.
+
+        Translation, flipping and flattening are applied.
+        Go deep first.
 
         Iteration over this Generator with infolevel = 1 will print the Nazca
         hierarchy, cell-levels to stdout.
 
         Yields:
-            info to open or close cells in the netlist.
+            Info to build cells in a netlist branch.
         """
-        cnode = cell.cnode
-        tab = '=='
+        cellinfo_open = namedtuple('cellinfo_open',
+            ['cell_start', 'cell', 'cell_create', 'cell_name',
+            'level', 'parent_level',
+            'transflip_loc', 'transflip_glob',
+            'scale', 'iters'])
+        cellinfo_close = namedtuple('cellinfo_close',
+            ['cell_start', 'cell_close', 'level'])
+        topdown = False
+        stack_instant = {}
+        stack_noninstant = []
+        if cellmap is None:
+            cellmap = {}
+
+        tab_open  = '>>'
+        tab_close = '<<'
+        tab_reuse = '**'
+        tab_flat  = '..'
+        NEWCELL = True
+        CLOSECELL= True
+
         if cells_visited is None:
             self.cells_visited = set()
         else:
             self.cells_visited = cells_visited
 
-        cell_iter = self.celltree_iter(cnode=cnode, level=level,
+        cell_iter = self.celltree_iter(cnode=cell.cnode, level=level,
             position=position, flat=flat, infolevel=0)
 
         if level == 0:
             if infolevel > 0:
                 print("Start Netlist (infolevel={})\n"
-                    "== -> open an instantiated cell\n"
-                    "<< -> close a cell\n"
-                    "** -> reused instantiated cell\n"
-                    ".. -> non-instantiated cell\n"
-                    "------------------------------".format(infolevel))
-            export_levels = [] # netlist levels corrresponding to export levels.
-            translist = []
-            fliplist = []
+                    "{} -> open an instantiated cell\n"
+                    "{} -> close a cell\n"
+                    "{} -> reused instantiated cell\n"
+                    "{} -> non-instantiated cell\n"
+                    "------------------------------".format(
+                    infolevel, tab_open, tab_close, tab_reuse, tab_flat))
+            export_levels = []  # stack for exported netlist levels.
+            translist_loc = []  # stack for local translation
+            fliplist_loc = []   # stack for local flip state
+            translist_glob = [] # stack for global translation
+            fliplist_glob = []  # stack for global flip state
+            scalelist = [1]      # stack for scaling of flattened instances
             level_last = 0 # top level is 0
-            level_duplicate = 100 # level
+            level_reuse = 100 # level
 
-        for cnode, level, org, flip in cell_iter:
-            if level > level_duplicate: #skip cells that are copies of previous cells.
+        for cnode, level, org, flip, scale in cell_iter:
+            if level > level_reuse:
+                #skip cells that are part of a reused cell.
                 continue
             else:
-                level_duplicate = 100
+                level_reuse = 100
 
             #close cells
             depth, stop = level_last, max(1, level)
             while depth >= stop:
-                if translist:
-                    translist.pop()
-                    fliplist.pop()
+                if not topdown: #bottom-up
+                    if export_levels[-1] in stack_instant.keys():
+                        #export level not yielded yet, hence yield it
+                        cellopen = stack_instant.pop(export_levels[-1])
+                        #print("--inst depth={}, stop={}, export_levels:{}, stack:{}, {}".\
+                        #      format(depth, stop, export_levels, list(stack_instant.keys()),
+                        #          cellopen[1][0].cell_name))
+                        yield cellopen
+                    if depth not in export_levels:
+                        cellopen = stack_noninstant.pop()
+                        #print("--non-inst depth={}, stop={}, {}".format(depth, stop, cellopen[1][0].cell_name))
+                        yield cellopen
+                if translist_loc:
+                    translist_loc.pop()
+                    fliplist_loc.pop()
+                    translist_glob.pop()
+                    fliplist_glob.pop()
                 if depth in export_levels:
                     export_levels.pop()
                     if infolevel > 1:
-                        print('{}close'.format('<<'*depth))
-                    yield "close", (True, depth)
+                        print('{}close({})'.format(tab_close*depth, depth))
+                    yield cellinfo_close(
+                        cell_start=None, cell_close=CLOSECELL, level=depth)
                 else:
-                    yield "close", (False, depth)
+                    scalelist.pop()
+                    yield cellinfo_close(
+                        cell_start=None, cell_close=not CLOSECELL, level=depth)
                 depth -= 1
 
             cellname = cnode.cell.cell_name
@@ -3011,63 +3287,143 @@ class Netlist:
                 if infolevel > 0:
                     text = 'create ' if infolevel > 2 else ''
                     if inst:
-                        print('{}{}{}'.format('=='*level, text, info))
+                        print('{}{}{}'.format(tab_open*level, text, info))
                     elif infolevel > 1:
-                        print('{}{}{}'.format('.'*len(tab)*level, text, info))
-                self.cells_visited.add(cellname)
+                        print('{}{}{}'.format(tab_flat*level, text, info))
 
+                self.cells_visited.add(cellname)
                 # Apply translation and flipping:
+                # global transflipping:
+                if level == 0:
+                    translist_glob.append(Pointer(0, 0, 0))
+                    fliplist_glob.append(False)
+                else:
+                    translate = translist_glob[-1].copy()
+                    orgtrans = org.copy()
+                    if fliplist_glob[-1]:
+                        orgtrans.flip()
+                    fliplast = fliplist_loc[-1] ^ flip
+                    fliplist_glob.append(fliplast)
+                    translate.move_ptr(orgtrans)
+                    translist_glob.append(translate)
+
+                # local transflipping:
                 if inst or level == 0: #create new export level
-                    create = True
+                    createcell = True
                     export_levels.append(level)
-                    translist.append(Pointer(0, 0, 0))
-                    fliplist.append(False)
                     fliplast = flip
+                    translist_loc.append(Pointer(0, 0, 0))
+                    fliplist_loc.append(False)
 
                 else: #flattened cell -> content translates into a parent cell.
-                    create = False
-                    translate = translist[-1].copy()
+                    createcell = False
+                    scalelist.append(scalelist[-1]*scale)
+                    translate = translist_loc[-1].copy()
                     orgtrans = org.copy()
-                    if fliplist[-1]:
+                    if fliplist_loc[-1]:
                         orgtrans.flip()
-                    fliplast = fliplist[-1] ^ flip
-                    fliplist.append(fliplast)
+                    fliplast = fliplist_loc[-1] ^ flip
+                    fliplist_loc.append(fliplast)
                     translate.move_ptr(orgtrans)
-                    translist.append(translate)
+                    translist_loc.append(translate)
 
                 parent_level = export_levels[-1]
-                trans = translist[-1]
-                flip = fliplist[-1]
+                transflip_loc = translist_loc[-1], fliplist_loc[-1]
+                transflip_glob = translist_glob[-1], fliplist_glob[-1]
 
-                yield "new",\
-                    (cnode.cell, create, level, trans, flip, parent_level)
+                apply_transflip = True
+                params = cnode, translist_loc[-1], fliplist_loc[-1],\
+                    scalelist[-1], apply_transflip, infolevel
+                pgon_iter = self.polygon_iter2(*params)
+                pline_iter = self.polyline_iter2(*params)
+                anno_iter = self.annotation_iter2(*params)
+                instance_iter = self.instance_iter2(*params)
+                gdsfile_iter = self.gdsfile_iter2(*params)
+                element_iters = {
+                    'polyline': pline_iter,
+                    'polygon': pgon_iter,
+                    'annotation': anno_iter,
+                    'instance': instance_iter,
+                    'gdsfile': gdsfile_iter,
+                    }
+
+                try:
+                    new_cell_name = cellmap[cellname]
+                except:
+                    new_cell_name = None
+                iterparams = cellinfo_open(
+                    cell_start=NEWCELL,
+                    cell=cnode.cell,
+                    cell_create=createcell,
+                    cell_name=new_cell_name,
+                    level=level,
+                    parent_level=parent_level,
+                    transflip_loc=transflip_loc,
+                    transflip_glob=transflip_glob,
+                    scale=scalelist[-1],
+                    iters=element_iters)
+                if topdown:
+                    yield iterparams
+                else:
+                    if createcell:
+                        stack_instant[level] = iterparams
+                    else:
+                        stack_noninstant.append(iterparams)
                 level_last = level
 
-            elif inst: #copy of earlier cell:
+            elif inst: #reuse of a previously processed cell:
                 if infolevel > 0:
                     text = 'reuse ' if infolevel > 1 else ''
-                    print('{}{}{}'.format('*'*len(tab)*level, text, info))
-                level_duplicate = level
+                    print('{}{}{}'.format(tab_reuse*level, text, info))
+                level_reuse = level
                 level_last = level-1
 
+
         #close cells
-        depth = level
+        if topdown:
+            depth = level
+        else:
+            depth= level_last
+
+        #print('Closing last')
         while depth >= 0:
+            if not topdown: #bottom-up
+                if export_levels[-1] in stack_instant.keys():
+                    #export level not yielded yet, hence yield it
+                    cellopen = stack_instant.pop(export_levels[-1])
+                    #print("--inst depth={}, stop={}, export_levels:{}, stack:{}, {}".\
+                    #      format(depth, stop, export_levels, list(stack_instant.keys()),
+                    #    cellclose      cellopen[1][0].cell_name))
+                    yield cellopen
+                if depth not in export_levels:
+                    cellopen = stack_noninstant.pop()
+                    #print("--non-inst depth={}, stop={}, {}".format(depth, stop, cellopen[1][0].cell_name))
+                    yield cellopen
             if infolevel > 2:
-                print("{}close".format(tab*depth, depth))
-            if translist:
-                translist.pop()
-                fliplist.pop()
+                print("{}close".format(tab_close*depth, depth))
+            if translist_loc:
+                translist_loc.pop()
+                fliplist_loc.pop()
+                translist_glob.pop()
+                fliplist_glob.pop()
             if depth in export_levels:
                 export_levels.pop()
                 if infolevel > 1:
-                    print('{}close'.format(tab*depth))
-                yield "close", (True, depth)
+                    print('{}close({})'.format(tab_close*depth, depth))
+                yield cellinfo_close(
+                    cell_start=None, cell_close=CLOSECELL, level=depth)
             else:
-                yield "close", (False, depth)
+                scalelist.pop()
+                yield cellinfo_close(
+                    cell_start=None, cell_close=not CLOSECELL, level=depth)
             depth -= 1
         if infolevel > 0:
             print("End Netlist")
+
+
+def cell_iter(topcell, cellmap=None, flat=False, infolevel=0):
+    """Get a cell iterator fo rebuilding cells."""
+    return Netlist().celltree_iter2(topcell, flat=flat, cellmap=cellmap)
 
 
 #little bit ugly, but needed for now to make the Cell.rebuild method

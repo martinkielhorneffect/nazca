@@ -43,6 +43,8 @@ import nazca as nd
 from .generic_bend import curve2polyline,gb_point,gb_coefficients,cbend_point
 
 
+min_length = 1e-12 # minimum straight waveguide length to draw
+
 def layeriter(xs=None, layer=None, dogrowy=False):
     """Generator yielding all layers in a xsection.
 
@@ -105,11 +107,11 @@ def layeriter(xs=None, layer=None, dogrowy=False):
                 "Recommended solutions: Use a different xsection "\
                 "or add layers to this xsection:\n"\
                 "add_layer2xsection('{0}', layer=<num>).".\
-                format(xs, cfg.default_dump_layer), stacklevel=0)
+                format(xs, cfg.default_layers['dump']), stacklevel=0)
             if dogrowy:
-                 yield cfg.default_dump_layer, 0, 0, 0.1
+                 yield cfg.default_layers['dump'], 0, 0, 0.1
             else:
-                yield cfg.default_dump_layer, 0, 0.1
+                yield cfg.default_layers['dump'], 0, 0.1
         else:
             layer_info = ML[['layer', 'datatype', 'growx', 'growy', 'accuracy']]
             for i, layer, datatype, growx, growy, accuracy in layer_info.itertuples():
@@ -145,9 +147,9 @@ def _handle_missing_xs(xs):
         nd.get_xsection(xs).mask_layers
     except:
         if xs == cfg.default_xserror_name:
-            layer = cfg.default_error_layer
+            layer = cfg.default_layers[xs]
         else:
-            layer = cfg.default_dump_layer
+            layer = cfg.default_layers['dump']
         nd.add_layer2xsection(xs, layer=layer)
     return layer
 
@@ -212,8 +214,8 @@ def Tp_straight(length=10, width=1.0, xs=None, layer=None, edge1=None,
                         Fp1.append((length*t, edge1(t)+growx))
                         Fp2.append((length*t, -edge2(t)-growx))
                     outline = Fp1 + list(reversed(Fp2))
-
-                nd.Polygon(layer=lay, points=outline).put(0)
+                if abs(length) > min_length:
+                    nd.Polygon(layer=lay, points=outline).put(0)
         return guide
     return cell
 
@@ -372,13 +374,15 @@ def __get_offset(xs, width, radius):
         return offset
     try:
         F = cfg.XSdict[xs].os
-        try:
-            offset = float(F)
-        except:
-            offset = F(width=width, radius=radius)
     except:
         _handle_missing_xs(xs)
         cfg.XSdict[xs].os = 0
+    else:
+        try:
+            offset = float(F)
+        except TypeError:
+            offset = F(width=width, radius=radius)
+
     return offset
 
 
@@ -601,7 +605,8 @@ def Tp_pcurve(xya=(100, 100, 10), width=1.0, Rin=0, Rout=0, Oin=None,
             try:
                 Rdrc = cfg.XSdict[xs].minimum_radius
             except:
-                pass
+                if xs not in cfg.XSdict.keys():
+                    Rdrc = 0
             if Rdrc > Rmin:
                 print('Warning: DRC minimum_radius {:.3f} < {:.3f}'.\
                     format(Rmin, Rdrc))

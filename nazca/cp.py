@@ -96,8 +96,22 @@ def mirror():
 def get_xya():
     return cfg.cp.pointer.get_xya()
 
+xya = get_xya
+
 def get_xy():
     return cfg.cp.pointer.get_xy()
 
+xy = get_xy
+
 def get_a():
-    return cfg.cp.pointer.get_a()
+    return cfg.cp.pointer.a
+
+def x():
+    return cfg.cp.pointer.x
+
+def y():
+    return cfg.cp.pointer.y
+
+a = get_a
+
+
